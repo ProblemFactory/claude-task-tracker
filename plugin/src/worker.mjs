@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import http from 'http';
-import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync, appendFileSync, readdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, unlinkSync, rmdirSync, mkdirSync, appendFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import {
@@ -224,19 +224,30 @@ async function analyzeWithSDK(prompt) {
 
 function cleanObserverSessions(sessionsDir) {
   try {
-    // Clean up JSONL files from both the sessions dir and the encoded project dir
+    // SDK creates sessions in ~/.claude/projects/<encoded-cwd>/
+    // The encoded name replaces path separators with dashes
     const encodedName = sessionsDir.replace(/\//g, '-').replace(/^-/, '');
     const projDir = join(homedir(), '.claude', 'projects', encodedName);
     for (const dir of [sessionsDir, projDir]) {
       if (!existsSync(dir)) continue;
-      for (const f of readdirSync(dir)) {
-        if (f.endsWith('.jsonl') || f.endsWith('.json')) {
-          try { unlinkSync(join(dir, f)); } catch {}
-        }
-      }
+      // Recursively clean .jsonl/.json files including subagents/ subdirs
+      cleanDirRecursive(dir);
     }
   } catch (e) {
     log(`Cleanup error: ${e.message}`);
+  }
+}
+
+function cleanDirRecursive(dir) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      cleanDirRecursive(full);
+      // Remove empty dirs (like subagents/)
+      try { if (!readdirSync(full).length) rmdirSync(full); } catch {}
+    } else if (entry.name.endsWith('.jsonl') || entry.name.endsWith('.json') || entry.name.endsWith('.meta.json')) {
+      try { unlinkSync(full); } catch {}
+    }
   }
 }
 
