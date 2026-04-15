@@ -1,0 +1,8 @@
+node_modules/
+*.log
+*.pid
+data.json
+config.json
+TASKS.md
+observer-sessions/
+.prompt-tmp.txt

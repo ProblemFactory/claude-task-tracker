@@ -1,0 +1,33 @@
+{
+  "name": "claude-task-tracker",
+  "version": "1.0.0",
+  "description": "Passive task tracking for Claude Code — observes conversations via hooks and maintains a global task database",
+  "type": "module",
+  "bin": {
+    "claude-task-tracker": "./bin/cli.mjs"
+  },
+  "scripts": {
+    "start": "node src/worker.mjs",
+    "install-hooks": "node bin/cli.mjs install",
+    "uninstall-hooks": "node bin/cli.mjs uninstall",
+    "status": "node bin/cli.mjs status"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "task-tracker",
+    "hooks",
+    "productivity"
+  ],
+  "author": "ProblemFactory",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "src/",
+    "bin/",
+    "README.md",
+    "LICENSE"
+  ]
+}
