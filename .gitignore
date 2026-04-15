@@ -2,6 +2,9 @@ node_modules/
 *.log
 *.pid
 data.json
+*.db
+*.db-wal
+*.db-shm
 config.json
 TASKS.md
 observer-sessions/

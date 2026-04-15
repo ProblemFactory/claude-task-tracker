@@ -3,7 +3,11 @@ import http from 'http';
 import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync, appendFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { loadData, saveData, renderMarkdown, DIR } from './store.mjs';
+import {
+  getAllTasks, getTaskById, getSubtasks, createTask, updateTask, taskExistsByTitle,
+  addSessionLink, getRecentLinks, getAnalysisState, setAnalysisState,
+  queryTasks, renderMarkdown, DIR
+} from './store.mjs';
 import { readTranscriptDelta, summarizeMessages } from './ai.mjs';
 import { loadConfig, saveConfig, getDefaults } from './config.mjs';
 
@@ -79,8 +83,7 @@ async function processQueue() {
 async function runAnalysis(job) {
   const { sessionId, cwd, transcriptPath, isFinal } = job;
   const cfg = loadConfig();
-  const data = loadData();
-  const state = data.analysisState[sessionId] || { offset: 0 };
+  const state = getAnalysisState(sessionId);
   const { messages, newOffset } = readTranscriptDelta(transcriptPath, state.offset);
 
   if (!messages.length) return;
@@ -88,12 +91,13 @@ async function runAnalysis(job) {
   if (!isFinal && summary.length < cfg.minDeltaChars) return;
   if (summary.length < cfg.minSummaryChars) return;
 
-  const openTasks = data.tasks.filter(t => t.status !== 'done');
+  const allTasks = getAllTasks();
+  const openTasks = allTasks.filter(t => t.status !== 'done');
   const taskList = openTasks.length
     ? openTasks.map(t => {
         const indent = t.parentId ? '  ' : '';
         const parent = t.parentId ? ` (subtask of #${t.parentId})` : '';
-        const subs = data.tasks.filter(s => s.parentId === t.id && s.status !== 'done');
+        const subs = getSubtasks(t.id).filter(s => s.status !== 'done');
         const subInfo = subs.length ? ` [${subs.length} subtasks]` : '';
         return `${indent}[#${t.id}] "${t.title}" (${t.status}) [${t.tags.join(',')}]${parent}${subInfo}`;
       }).join('\n')
@@ -135,10 +139,9 @@ parent_id: set to an existing task ID to create a subtask, or null for a top-lev
 
   const result = await analyzeWithSDK(prompt);
   if (result) {
-    applyResult(data, result, sessionId, cwd);
-    data.analysisState[sessionId] = { offset: newOffset, analyzedAt: new Date().toISOString() };
-    saveData(data);
-    renderMarkdown(data);
+    applyResult(result, sessionId, cwd);
+    setAnalysisState(sessionId, newOffset);
+    renderMarkdown();
     log(`Analyzed: ${result.updates?.length || 0} updates, ${result.new_tasks?.length || 0} new. "${result.session_summary || ''}"`);
   }
 }
@@ -205,58 +208,56 @@ function parseJSON(raw) {
   return null;
 }
 
-function applyResult(data, result, sessionId, cwd) {
+function applyResult(result, sessionId, cwd) {
+  const now = new Date().toISOString();
+  const today = now.slice(0, 10);
+
   for (const u of result.updates || []) {
-    const task = data.tasks.find(t => t.id === u.task_id);
+    const task = getTaskById(u.task_id);
     if (!task) continue;
-    if (u.status) task.status = u.status;
-    if (u.notes) task.notes = (task.notes ? task.notes + '\n' : '') + `[${new Date().toISOString().slice(0, 10)}] ${u.notes}`;
-    task.updatedAt = new Date().toISOString();
-    if (u.status === 'done') task.completedAt = new Date().toISOString();
-    addLink(data, task.id, sessionId, cwd, u.status === 'done' ? 'completed' : 'progressed', u.notes);
+    const updates = {};
+    if (u.status) updates.status = u.status;
+    if (u.notes) updates.notes = (task.notes ? task.notes + '\n' : '') + `[${today}] ${u.notes}`;
+    if (u.status === 'done') updates.completedAt = now;
+    updateTask(task.id, updates);
+    addSessionLink({ taskId: task.id, sessionId, project: cwd, role: u.status === 'done' ? 'completed' : 'progressed', summary: u.notes });
   }
+
   for (const n of result.new_tasks || []) {
     if (!n.title) continue;
-    if (data.tasks.some(t => t.title.toLowerCase() === n.title.toLowerCase())) continue;
-    // Validate parent_id if provided
-    const parentId = n.parent_id && data.tasks.some(t => t.id === n.parent_id) ? n.parent_id : null;
-    const id = data.nextId++;
-    data.tasks.push({
-      id, title: n.title, status: n.status || 'open', priority: n.priority || 'normal',
-      notes: n.notes ? `[${new Date().toISOString().slice(0, 10)}] ${n.notes}` : '',
-      tags: n.tags || [], parentId, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), completedAt: null,
-    });
-    // Inherit tags from parent if subtask has none
-    if (parentId && (!n.tags || !n.tags.length)) {
-      const parent = data.tasks.find(t => t.id === parentId);
-      if (parent?.tags?.length) data.tasks[data.tasks.length - 1].tags = [...parent.tags];
+    if (taskExistsByTitle(n.title)) continue;
+    const parentId = n.parent_id && getTaskById(n.parent_id) ? n.parent_id : null;
+    let tags = n.tags || [];
+    if (parentId && !tags.length) {
+      const parent = getTaskById(parentId);
+      if (parent?.tags?.length) tags = [...parent.tags];
     }
-    addLink(data, id, sessionId, cwd, 'created', n.notes);
+    const id = createTask({
+      title: n.title, status: n.status || 'open', priority: n.priority || 'normal',
+      notes: n.notes ? `[${today}] ${n.notes}` : '', tags, parentId,
+    });
+    addSessionLink({ taskId: id, sessionId, project: cwd, role: 'created', summary: n.notes });
   }
+
   // Auto-complete parents when all subtasks are done
   for (const u of result.updates || []) {
     if (u.status === 'done') {
-      const task = data.tasks.find(t => t.id === u.task_id);
+      const task = getTaskById(u.task_id);
       if (task?.parentId) {
-        const siblings = data.tasks.filter(t => t.parentId === task.parentId);
+        const siblings = getSubtasks(task.parentId);
         if (siblings.length && siblings.every(t => t.status === 'done')) {
-          const parent = data.tasks.find(t => t.id === task.parentId);
+          const parent = getTaskById(task.parentId);
           if (parent && parent.status !== 'done') {
-            parent.status = 'done';
-            parent.completedAt = new Date().toISOString();
-            parent.updatedAt = new Date().toISOString();
-            parent.notes = (parent.notes ? parent.notes + '\n' : '') + `[${new Date().toISOString().slice(0, 10)}] All subtasks completed`;
-            addLink(data, parent.id, sessionId, cwd, 'completed', 'All subtasks completed');
+            updateTask(parent.id, {
+              status: 'done', completedAt: now,
+              notes: (parent.notes ? parent.notes + '\n' : '') + `[${today}] All subtasks completed`,
+            });
+            addSessionLink({ taskId: parent.id, sessionId, project: cwd, role: 'completed', summary: 'All subtasks completed' });
           }
         }
       }
     }
   }
-}
-
-function addLink(data, taskId, sessionId, cwd, role, summary) {
-  if (data.sessionLinks.some(l => l.taskId === taskId && l.sessionId === sessionId && l.role === role)) return;
-  data.sessionLinks.push({ taskId, sessionId, project: cwd, role, summary: summary || '', createdAt: new Date().toISOString() });
 }
 
 // ── HTTP Server ──
@@ -318,25 +319,18 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url.pathname === '/api/tasks' && req.method === 'GET') {
-    const data = loadData();
     const cfg = loadConfig();
     const tag = url.searchParams.get('tag');
     const status = url.searchParams.get('status');
     const project = url.searchParams.get('project');
-    let tasks = data.tasks;
-    if (tag) tasks = tasks.filter(t => (t.tags||[]).some(g => g.toLowerCase().includes(tag.toLowerCase())));
-    if (status) tasks = tasks.filter(t => t.status === status);
-    if (project) {
-      const linked = new Set(data.sessionLinks.filter(l => l.project && l.project.toLowerCase().includes(project.toLowerCase())).map(l => l.taskId));
-      tasks = tasks.filter(t => linked.has(t.id) || (t.tags||[]).some(g => g.toLowerCase().includes(project.toLowerCase())));
-    }
-    res.end(JSON.stringify({ tasks, sessionLinks: data.sessionLinks.slice(-cfg.recentLinksLimit) }));
+    const tasks = queryTasks({ tag, status, project });
+    const sessionLinks = getRecentLinks(cfg.recentLinksLimit);
+    res.end(JSON.stringify({ tasks, sessionLinks }));
     return;
   }
 
   if (url.pathname === '/api/context' && req.method === 'GET') {
-    const data = loadData();
-    const active = data.tasks.filter(t => t.status !== 'done');
+    const active = getAllTasks().filter(t => t.status !== 'done');
     if (!active.length) { res.end(JSON.stringify({ context: null })); return; }
     const roots = active.filter(t => !t.parentId);
     const lines = [];
@@ -345,7 +339,6 @@ const server = http.createServer(async (req, res) => {
       const subs = active.filter(s => s.parentId === t.id);
       for (const s of subs) lines.push(`  - #${s.id} ${s.title} (${s.status})`);
     }
-    // Include orphaned subtasks whose parent is done
     const orphans = active.filter(t => t.parentId && !roots.some(r => r.id === t.parentId));
     for (const t of orphans) lines.push(`- #${t.id} ${t.title} (${t.status}) [${t.tags.join(', ')}]`);
     res.end(JSON.stringify({ context: `# Active Tasks (task-tracker)\n${lines.join('\n')}` }));
