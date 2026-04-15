@@ -122,6 +122,9 @@ Match work to existing tasks by SEMANTIC similarity. "task" = meaningful work un
 Don't create tasks for greetings, clarifications, routine git ops.
 Only update status with CLEAR evidence.
 
+## Stale task review
+ALSO review the existing open tasks below. If the conversation provides evidence that a task is ALREADY DONE (e.g. the feature was completed in a previous session, the bug was fixed, the user mentions it's finished), mark it done in updates. Don't leave tasks in open/in_progress if the conversation clearly shows the work is complete.
+
 ## Task fields
 - title: 5-15 words, specific and descriptive
 - tags: project name, area, technology (multiple encouraged)

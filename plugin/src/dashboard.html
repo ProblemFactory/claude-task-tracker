@@ -288,14 +288,44 @@ function renderTagFilter() {
   sel.onchange = () => { activeTag = sel.value; renderAll(); };
 }
 
+function getFamily(taskId) {
+  // Returns all IDs in a task's hierarchy (ancestors + descendants)
+  const ids = new Set([taskId]);
+  // Walk up
+  let cur = allTasks.find(t => t.id === taskId);
+  while (cur?.parentId) {
+    ids.add(cur.parentId);
+    cur = allTasks.find(t => t.id === cur.parentId);
+  }
+  // Walk down
+  function addChildren(pid) {
+    for (const c of allTasks.filter(t => t.parentId === pid)) {
+      ids.add(c.id);
+      addChildren(c.id);
+    }
+  }
+  addChildren(taskId);
+  return ids;
+}
+
+// Cache project-linked task families (rebuilt each load)
+let _projectFamilyCache = null;
+function getProjectLinkedIds(project) {
+  if (!_projectFamilyCache) _projectFamilyCache = {};
+  if (_projectFamilyCache[project]) return _projectFamilyCache[project];
+  const directIds = new Set(allLinks.filter(l => l.project && l.project.toLowerCase().includes(project.toLowerCase())).map(l => l.taskId));
+  const familyIds = new Set();
+  for (const id of directIds) for (const fid of getFamily(id)) familyIds.add(fid);
+  _projectFamilyCache[project] = familyIds;
+  return familyIds;
+}
+
 function filterTasks() {
+  _projectFamilyCache = null;
   return allTasks.filter(t => {
     if (!activeStatuses.has(t.status)) return false;
     if (activePriorities.size && !activePriorities.has(t.priority)) return false;
-    if (activeProject) {
-      const linked = allLinks.filter(l => l.taskId === t.id);
-      if (!linked.some(l => l.project && l.project.toLowerCase().includes(activeProject.toLowerCase()))) return false;
-    }
+    if (activeProject && !getProjectLinkedIds(activeProject).has(t.id)) return false;
     if (activeTag && !(t.tags||[]).some(tag => tag.toLowerCase() === activeTag.toLowerCase())) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
