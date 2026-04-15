@@ -137,11 +137,16 @@ Only update status with CLEAR evidence.
   Write 2-5 sentences. This field is used to match future conversations to existing tasks, so include distinctive keywords and specifics.
 - notes: Factual timestamped log. For UPDATES, append what changed this session. Be specific: mention file names, function names, error messages, commands run, decisions made. Each entry should be self-contained enough to understand without reading previous entries.
 
-## Subtasks
+## Subtasks & Reparenting
 Break large tasks into subtasks aggressively. Use parent_id to link.
 - If conversation reveals sub-work of an existing task, create subtasks under it.
 - Parent status reflects overall progress; subtasks track individual pieces.
 - Max 2 levels deep. When ALL subtasks done → mark parent done.
+- REPARENTING: If you discover an existing top-level task is actually part of a bigger goal:
+  1. Create the new parent task (in new_tasks with parent_id: null)
+  2. In updates, set parent_id on the existing task(s) to the new parent's ID placeholder "NEW:title"
+     Example: {"task_id":5,"parent_id":"NEW:Migrate entire backend to microservices","notes":"reparented: this is part of the larger migration"}
+  The system will resolve "NEW:title" to the actual ID after creating new tasks.
 
 ## Origin classification (CRITICAL — be precise)
 Each task and update MUST have an origin + origin_reason:
@@ -168,7 +173,7 @@ ${taskList}
 ${summary.slice(0, cfg.maxPromptChars)}
 
 Respond with ONLY JSON:
-{"updates":[{"task_id":N,"status":"...","notes":"[date] specific changes: files modified, decisions made, outcomes","origin":"user_initiated","origin_reason":"evidence","context_append":"new context info discovered this session (optional, appended to existing)"}],"new_tasks":[{"title":"...","status":"in_progress","priority":"normal","tags":["project","area","tech"],"category":"feature","context":"Rich: why it exists + what's involved + key files + decisions. 2-5 sentences.","notes":"[date] what happened","parent_id":null,"origin":"user_initiated","origin_reason":"evidence"}],"session_summary":"one line"}
+{"updates":[{"task_id":N,"status":"...","notes":"[date] specific changes","origin":"user_initiated","origin_reason":"evidence","context_append":"new info (optional)","parent_id":null}],"new_tasks":[{"title":"...","status":"in_progress","priority":"normal","tags":["project","area","tech"],"category":"feature","context":"Rich: why it exists + what's involved + key files + decisions. 2-5 sentences.","notes":"[date] what happened","parent_id":null,"origin":"user_initiated","origin_reason":"evidence"}],"session_summary":"one line"}
 ${cfg.language && cfg.language !== 'auto' ? `\nIMPORTANT: Write ALL text fields in ${cfg.language}.` : '\nIMPORTANT: Write all text fields in the SAME language the user uses in the conversation.'}`;
 
   if (!queryFn) { log('No SDK available, skipping analysis'); return; }
@@ -250,28 +255,8 @@ function applyResult(result, sessionId, cwd) {
 
   const VALID_ORIGINS = ['user_initiated', 'user_confirmed', 'user_implicit', 'agent_pending', 'agent_ignored'];
 
-  for (const u of result.updates || []) {
-    const task = getTaskById(u.task_id);
-    if (!task) continue;
-    const updates = {};
-    if (u.status) updates.status = u.status;
-    if (u.notes) updates.notes = (task.notes ? task.notes + '\n' : '') + `[${today}] ${u.notes}`;
-    if (u.status === 'done') updates.completedAt = now;
-    // Append new context discovered this session
-    if (u.context_append) {
-      updates.context = (task.context ? task.context + ' ' : '') + u.context_append;
-    }
-    // Origin transitions
-    if (u.origin && VALID_ORIGINS.includes(u.origin)) {
-      const cur = task.origin;
-      // Only allow upgrades (agent_* → user_*), never downgrade user_initiated
-      if (cur !== 'user_initiated') updates.origin = u.origin;
-      if (u.origin_reason) updates.origin_reason = u.origin_reason;
-    }
-    updateTask(task.id, updates);
-    addSessionLink({ taskId: task.id, sessionId, project: cwd, role: u.status === 'done' ? 'completed' : 'progressed', summary: u.notes });
-  }
-
+  // Create new tasks first so we can resolve "NEW:title" references in updates
+  const newTitleToId = {};
   for (const n of result.new_tasks || []) {
     if (!n.title) continue;
     if (taskExistsByTitle(n.title)) continue;
@@ -288,7 +273,40 @@ function applyResult(result, sessionId, cwd) {
       origin, originReason: n.origin_reason || '',
       category: n.category || '', context: n.context || '',
     });
+    newTitleToId[n.title] = id;
     addSessionLink({ taskId: id, sessionId, project: cwd, role: 'created', summary: n.notes });
+  }
+
+  // Then apply updates (can reference newly created tasks via "NEW:title")
+  for (const u of result.updates || []) {
+    const task = getTaskById(u.task_id);
+    if (!task) continue;
+    const updates = {};
+    if (u.status) updates.status = u.status;
+    if (u.notes) updates.notes = (task.notes ? task.notes + '\n' : '') + `[${today}] ${u.notes}`;
+    if (u.status === 'done') updates.completedAt = now;
+    // Reparenting: resolve "NEW:title" to actual ID, or use numeric parent_id
+    if (u.parent_id != null) {
+      if (typeof u.parent_id === 'string' && u.parent_id.startsWith('NEW:')) {
+        const title = u.parent_id.slice(4);
+        const resolved = newTitleToId[title];
+        if (resolved) updates.parentId = resolved;
+      } else if (typeof u.parent_id === 'number' && getTaskById(u.parent_id)) {
+        updates.parentId = u.parent_id;
+      }
+    }
+    // Append new context discovered this session
+    if (u.context_append) {
+      updates.context = (task.context ? task.context + ' ' : '') + u.context_append;
+    }
+    // Origin transitions
+    if (u.origin && VALID_ORIGINS.includes(u.origin)) {
+      const cur = task.origin;
+      if (cur !== 'user_initiated') updates.origin = u.origin;
+      if (u.origin_reason) updates.origin_reason = u.origin_reason;
+    }
+    updateTask(task.id, updates);
+    addSessionLink({ taskId: task.id, sessionId, project: cwd, role: u.status === 'done' ? 'completed' : 'progressed', summary: u.notes });
   }
 
   // Auto-complete parents when all subtasks are done
