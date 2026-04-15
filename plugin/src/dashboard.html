@@ -370,19 +370,25 @@ function renderTasks() {
   const filtered = filterTasks();
   const main = document.getElementById('main');
 
-  // Root tasks only at top level — subtasks always rendered inside their parent card
-  // A root task is shown if it passes filters OR if any of its subtasks pass filters
-  const allIds = new Set(allTasks.map(t => t.id));
-  const rootTasks = filtered.filter(t => !t.parentId);
-  // Also pull in parents whose subtasks matched the filter but parent didn't
-  const matchedSubParents = new Set();
-  filtered.filter(t => t.parentId).forEach(t => {
-    if (!rootTasks.some(r => r.id === t.parentId)) matchedSubParents.add(t.parentId);
-  });
-  for (const pid of matchedSubParents) {
-    const parent = allTasks.find(t => t.id === pid);
-    if (parent && !rootTasks.some(r => r.id === pid)) rootTasks.push(parent);
+  // Root tasks only — subtasks render inside their parent card
+  // Walk up to find the true root for any matched subtask
+  function findRoot(t) {
+    let cur = t;
+    const seen = new Set();
+    while (cur.parentId && !seen.has(cur.parentId)) {
+      seen.add(cur.parentId);
+      const p = allTasks.find(x => x.id === cur.parentId);
+      if (!p) break;
+      cur = p;
+    }
+    return cur;
   }
+  const rootSet = new Map();
+  for (const t of filtered) {
+    const root = findRoot(t);
+    if (!rootSet.has(root.id)) rootSet.set(root.id, root);
+  }
+  const rootTasks = [...rootSet.values()];
 
   if (!rootTasks.length) {
     main.innerHTML = `<div class="empty"><h2>No tasks match</h2><p>Adjust filters or wait for the tracker to observe your sessions.</p></div>`;
