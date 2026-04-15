@@ -132,6 +132,13 @@ setTimeout(() => process.exit(0), 8000);
 
 async function main(input) {
   const event = input.hook_event_name;
+
+  // Guard: skip if this session is from our own SDK analysis (prevents infinite loop)
+  // SDK query() runs with cwd=observer-sessions, which triggers hooks on that session
+  if (input.cwd && input.cwd.includes('observer-sessions')) {
+    return null;
+  }
+
   log(`${event} session=${input.session_id?.slice(0, 8)} cwd=${input.cwd}`);
 
   if (event === 'SessionStart') {
