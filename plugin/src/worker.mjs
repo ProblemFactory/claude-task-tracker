@@ -36,6 +36,10 @@ async function loadSDK() {
     const globalRoot = execSync('npm root -g', { encoding: 'utf-8' }).trim();
     const { readdirSync, existsSync: ex } = await import('fs');
     const { join: pjoin } = await import('path');
+    // Top-level global install (npm i -g @anthropic-ai/claude-agent-sdk)
+    const topLevel = pjoin(globalRoot, '@anthropic-ai', 'claude-agent-sdk');
+    if (ex(topLevel)) candidates.push(topLevel);
+    // Nested in other global packages
     for (const pkg of readdirSync(globalRoot).filter(d => !d.startsWith('.'))) {
       const sdkPath = pjoin(globalRoot, pkg, 'node_modules', '@anthropic-ai', 'claude-agent-sdk');
       if (ex(sdkPath)) candidates.push(sdkPath);
