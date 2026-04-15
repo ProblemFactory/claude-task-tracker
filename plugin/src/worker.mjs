@@ -16,6 +16,13 @@ const PORT = config.port;
 const PID_FILE = join(DIR, 'worker.pid');
 const LOG = join(DIR, 'debug.log');
 
+// Read version at startup
+let WORKER_VERSION = 'unknown';
+try {
+  const pluginJson = JSON.parse(readFileSync(join(new URL('..', import.meta.url).pathname, '.claude-plugin', 'plugin.json'), 'utf-8'));
+  WORKER_VERSION = pluginJson.version;
+} catch {}
+
 function log(msg) {
   try {
     mkdirSync(DIR, { recursive: true });
@@ -301,7 +308,7 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
 
   if (url.pathname === '/health' && req.method === 'GET') {
-    res.end(JSON.stringify({ status: 'ok', pid: process.pid, uptime: process.uptime(), sdkLoaded: !!queryFn }));
+    res.end(JSON.stringify({ status: 'ok', pid: process.pid, uptime: process.uptime(), sdkLoaded: !!queryFn, version: WORKER_VERSION }));
     return;
   }
 

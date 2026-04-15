@@ -11,6 +11,13 @@ const DIR = join(homedir(), '.claude', 'task-tracker');
 const PID_FILE = join(DIR, 'worker.pid');
 const LOG = join(DIR, 'debug.log');
 
+// Read current plugin version (hook always runs from latest code)
+let CURRENT_VERSION = 'unknown';
+try {
+  const pluginJson = JSON.parse(readFileSync(join(new URL('..', import.meta.url).pathname, '.claude-plugin', 'plugin.json'), 'utf-8'));
+  CURRENT_VERSION = pluginJson.version;
+} catch {}
+
 function log(msg) {
   try {
     mkdirSync(DIR, { recursive: true });
@@ -79,7 +86,16 @@ function startWorker() {
 async function ensureWorker() {
   if (isWorkerAlive()) {
     const health = await workerGet('/health');
-    if (health?.status === 'ok') return true;
+    if (health?.status === 'ok') {
+      // Check version — restart if worker is running stale code
+      if (health.version && CURRENT_VERSION !== 'unknown' && health.version !== CURRENT_VERSION) {
+        log(`Worker version ${health.version} != plugin ${CURRENT_VERSION}, restarting`);
+        await workerPost('/shutdown', {});
+        await new Promise(r => setTimeout(r, 1000));
+      } else {
+        return true;
+      }
+    }
   }
   startWorker();
   for (let i = 0; i < 6; i++) {
