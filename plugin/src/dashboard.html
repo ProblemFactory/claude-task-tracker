@@ -321,7 +321,7 @@ function renderTaskCard(t) {
     for (const s of subtasks.sort((a,b) => (a.status==='done'?1:0)-(b.status==='done'?1:0) || (b.updatedAt||'').localeCompare(a.updatedAt||''))) {
       const sDate = (s.updatedAt||s.createdAt||'').slice(0,10);
       const sNotes = (s.notes||'').trim();
-      subtaskHtml += `<div class="subtask-item" onclick="event.stopPropagation();this.classList.toggle('sub-expanded')">
+      subtaskHtml += `<div class="subtask-item" data-task-id="${s.id}" onclick="event.stopPropagation();this.classList.toggle('sub-expanded')">
         <div class="task-status status-${s.status}"></div>
         <div class="subtask-body">
           <div class="subtask-title">${esc(s.title)}</div>
@@ -348,7 +348,7 @@ function renderTaskCard(t) {
   // Expand area: subtasks first, then notes
   const hasExpand = subtaskHtml || notesHtml;
 
-  return `<div class="task-card${isAgent ? ' origin-agent' : ''}" onclick="this.classList.toggle('expanded')">
+  return `<div class="task-card${isAgent ? ' origin-agent' : ''}" data-task-id="${t.id}" onclick="this.classList.toggle('expanded')">
     <div class="task-status status-${t.status}"></div>
     <div class="task-body">
       <div class="task-title">${esc(t.title)} ${subLabel}</div>
@@ -366,9 +366,24 @@ function renderTaskCard(t) {
   </div>`;
 }
 
+function saveExpandState() {
+  const state = { cards: new Set(), subs: new Set(), notes: new Set() };
+  document.querySelectorAll('.task-card.expanded').forEach(el => { if (el.dataset.taskId) state.cards.add(el.dataset.taskId); });
+  document.querySelectorAll('.subtask-item.sub-expanded').forEach(el => { if (el.dataset.taskId) state.subs.add(el.dataset.taskId); });
+  document.querySelectorAll('.notes-toggle.open').forEach(el => { const card = el.closest('[data-task-id]'); if (card) state.notes.add(card.dataset.taskId); });
+  return state;
+}
+
+function restoreExpandState(state) {
+  state.cards.forEach(id => { const el = document.querySelector(`.task-card[data-task-id="${id}"]`); if (el) el.classList.add('expanded'); });
+  state.subs.forEach(id => { const el = document.querySelector(`.subtask-item[data-task-id="${id}"]`); if (el) el.classList.add('sub-expanded'); });
+  state.notes.forEach(id => { const el = document.querySelector(`[data-task-id="${id}"] .notes-toggle`); if (el) el.classList.add('open'); });
+}
+
 function renderTasks() {
   const filtered = filterTasks();
   const main = document.getElementById('main');
+  const expandState = saveExpandState();
 
   // Root tasks only — subtasks render inside their parent card
   // Walk up to find the true root for any matched subtask
@@ -413,6 +428,7 @@ function renderTasks() {
     html += '</div></div>';
   }
   main.innerHTML = html;
+  restoreExpandState(expandState);
 }
 
 function renderActivity() {
