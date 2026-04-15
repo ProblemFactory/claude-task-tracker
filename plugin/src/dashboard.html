@@ -369,7 +369,8 @@ function renderTaskCard(t) {
         <div class="task-status status-${s.status}"></div>
         <div class="subtask-body">
           <div class="subtask-title">${esc(s.title)}</div>
-          <div class="subtask-meta">#${s.id} &middot; ${sDate}${(s.origin||'').startsWith('agent')?' &middot; <span class="origin-badge '+(s.origin)+'" title="'+(esc(s.originReason||''))+'">'+(ORIGIN_LABELS[s.origin]||s.origin)+'</span>':''}${s.priority==='high'?' &middot; <span class="priority-high">high</span>':''}</div>
+          <div class="subtask-meta">#${s.id} &middot; ${sDate}${ORIGIN_LABELS[s.origin]?' &middot; <span class="origin-badge '+(s.origin)+'" title="'+(esc(s.originReason||''))+'">'+(ORIGIN_LABELS[s.origin])+'</span>':''}${s.category?' &middot; <span class="task-category">'+esc(s.category)+'</span>':''}${s.priority==='high'?' &middot; <span class="priority-high">high</span>':''}</div>
+          ${s.context ? `<div style="font-size:10px;color:var(--text-dim);margin-top:2px">${esc(s.context)}</div>` : ''}
           ${sNotes ? `<div class="subtask-notes">${esc(sNotes)}</div>` : ''}
         </div>
       </div>`;
