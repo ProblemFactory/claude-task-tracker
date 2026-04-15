@@ -163,12 +163,12 @@ select { width:100%; padding:4px 8px; border-radius:4px; border:1px solid var(--
     <div class="search"><input type="text" id="search" placeholder="Search tasks..."></div>
     <div class="filters">
       <div class="filter-group">
-        <label>Status</label>
-        <div class="filter-pills" id="status-pills"></div>
-      </div>
-      <div class="filter-group">
         <label>Project</label>
         <select id="project-filter"><option value="">All projects</option></select>
+      </div>
+      <div class="filter-group">
+        <label>Status</label>
+        <div class="filter-pills" id="status-pills"></div>
       </div>
       <div class="filter-group">
         <label>Tag</label>
@@ -177,6 +177,14 @@ select { width:100%; padding:4px 8px; border-radius:4px; border:1px solid var(--
       <div class="filter-group">
         <label>Priority</label>
         <div class="filter-pills" id="priority-pills"></div>
+      </div>
+      <div class="filter-group">
+        <label>Origin</label>
+        <select id="origin-filter"><option value="">All origins</option></select>
+      </div>
+      <div class="filter-group">
+        <label>Category</label>
+        <select id="category-filter"><option value="">All categories</option></select>
       </div>
     </div>
     <div class="activity-list" id="activity"></div>
@@ -202,7 +210,7 @@ select { width:100%; padding:4px 8px; border-radius:4px; border:1px solid var(--
 
 <script>
 const API = `http://${location.host}`;
-let allTasks = [], allLinks = [], activeStatuses = new Set(['open','in_progress','blocked']), activePriorities = new Set(), activeTag = '', activeProject = '', searchQuery = '';
+let allTasks = [], allLinks = [], activeStatuses = new Set(['open','in_progress','blocked']), activePriorities = new Set(), activeTag = '', activeProject = '', activeOrigin = '', activeCategory = '', searchQuery = '';
 const ORIGIN_LABELS = { user_initiated:'requested', user_confirmed:'confirmed', user_implicit:'implicit', agent_pending:'pending', agent_ignored:'ignored' };
 let currentConfig = {}, defaultConfig = {};
 
@@ -222,6 +230,8 @@ function renderAll() {
   renderPriorityPills();
   renderProjectFilter();
   renderTagFilter();
+  renderOriginFilter();
+  renderCategoryFilter();
   renderTasks();
   renderActivity();
 }
@@ -232,9 +242,26 @@ function renderStats() {
   document.getElementById('stats').textContent = `${allTasks.length} tasks \u00b7 ${active} active \u00b7 ${done} done`;
 }
 
+function getFilteredExcludingStatus() {
+  // Filter by everything EXCEPT status, so pills show counts for available tasks
+  return allTasks.filter(t => {
+    if (activePriorities.size && !activePriorities.has(t.priority)) return false;
+    if (activeProject && !getProjectLinkedIds(activeProject).has(t.id)) return false;
+    if (activeTag && !(t.tags||[]).some(tag => tag.toLowerCase() === activeTag.toLowerCase())) return false;
+    if (activeOrigin && t.origin !== activeOrigin) return false;
+    if (activeCategory && t.category !== activeCategory) return false;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      return t.title.toLowerCase().includes(q) || (t.notes||'').toLowerCase().includes(q) || (t.tags||[]).some(tag => tag.toLowerCase().includes(q));
+    }
+    return true;
+  });
+}
+
 function renderStatusPills() {
+  const relevantTasks = getFilteredExcludingStatus();
   const counts = {};
-  for (const t of allTasks) counts[t.status] = (counts[t.status]||0) + 1;
+  for (const t of relevantTasks) counts[t.status] = (counts[t.status]||0) + 1;
   const statuses = ['open','in_progress','blocked','done'];
   const labels = { open:'Open', in_progress:'In Progress', blocked:'Blocked', done:'Done' };
   const el = document.getElementById('status-pills');
@@ -288,6 +315,26 @@ function renderTagFilter() {
   sel.onchange = () => { activeTag = sel.value; renderAll(); };
 }
 
+function renderOriginFilter() {
+  const origins = new Set();
+  for (const t of allTasks) if (t.origin) origins.add(t.origin);
+  const sel = document.getElementById('origin-filter');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">All origins</option>' + [...origins].sort().map(o => `<option value="${esc(o)}">${ORIGIN_LABELS[o]||o}</option>`).join('');
+  sel.value = prev || '';
+  sel.onchange = () => { activeOrigin = sel.value; renderAll(); };
+}
+
+function renderCategoryFilter() {
+  const cats = new Set();
+  for (const t of allTasks) if (t.category) cats.add(t.category);
+  const sel = document.getElementById('category-filter');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">All categories</option>' + [...cats].sort().map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  sel.value = prev || '';
+  sel.onchange = () => { activeCategory = sel.value; renderAll(); };
+}
+
 function getFamily(taskId) {
   // Returns all IDs in a task's hierarchy (ancestors + descendants)
   const ids = new Set([taskId]);
@@ -327,6 +374,8 @@ function filterTasks() {
     if (activePriorities.size && !activePriorities.has(t.priority)) return false;
     if (activeProject && !getProjectLinkedIds(activeProject).has(t.id)) return false;
     if (activeTag && !(t.tags||[]).some(tag => tag.toLowerCase() === activeTag.toLowerCase())) return false;
+    if (activeOrigin && t.origin !== activeOrigin) return false;
+    if (activeCategory && t.category !== activeCategory) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       return t.title.toLowerCase().includes(q) || (t.notes||'').toLowerCase().includes(q) || (t.tags||[]).some(tag => tag.toLowerCase().includes(q));
