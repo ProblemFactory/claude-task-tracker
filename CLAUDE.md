@@ -36,13 +36,15 @@ All at `~/.claude/task-tracker/`:
 - **Worker service pattern** — Hook is a short-lived process (stdin→POST→exit). Worker is a persistent background process that queues analysis jobs, runs AI, and serves the dashboard.
 - **Agent SDK for AI calls** — Uses `@anthropic-ai/claude-agent-sdk` query() function (same auth as Claude Code, ToS-compliant). SDK found by scanning global node_modules. Fallback via createRequire() for CJS packages.
 - **Incremental transcript analysis** — Tracks byte offset per session. Only reads new JSONL lines since last analysis. Avoids re-processing.
-- **Observer session isolation** — SDK query() gets `cwd: observer-sessions/` to prevent polluting user's project directories with session files.
+- **Observer session isolation** — SDK query() gets `cwd: observer-sessions/` to prevent polluting user's project directories with session files. Cleanup is recursive (handles `subagents/` subdirs).
+- **Self-loop prevention** — Three-layer defense against infinite hook→worker→SDK→hook loops: (1) SDK sessions have all tools disallowed, (2) SDK runs in isolated cwd, (3) hook checks `input.cwd.startsWith(observerCwd)` using the exact path from worker `/health`. No substring matching — avoids false positives on user projects.
 - **SQLite over JSON** — Switched from data.json to node:sqlite (Node >= 22) for indexed queries and no full-file rewrite on every operation. Auto-migrates from data.json on first run.
 - **Subtask hierarchy** — Tasks have `parentId` field. AI prompt instructs to break large tasks into subtasks. Parent auto-completes when all subtasks are done. Max 2 levels deep.
 - **Global tasks** — Tasks are NOT tied to folders. AI matches work to existing tasks by semantic similarity across sessions and projects. Context field stores rich descriptions to improve matching.
 - **5-level origin tracking** — Distinguishes user_initiated, user_confirmed, user_implicit, agent_pending, agent_ignored. Each with origin_reason explaining the classification evidence. Origin can upgrade (agent_pending → user_confirmed) but never downgrade user_initiated.
 - **Rich task metadata** — category (bugfix/feature/refactor/research/devops/review/docs/support), context (why task exists, what's involved, key files, decisions), context_append on updates for evolving history.
 - **Auto-restart on update** — Hook reads plugin.json version, compares with worker /health version. Mismatch triggers automatic shutdown + respawn. Users never need manual restarts after `claude plugins update`.
+- **Reparenting** — AI can move existing tasks under a new parent when it discovers they're part of a larger goal. Uses `parent_id: "NEW:Parent Title"` in updates, resolved after new tasks are created.
 
 ## Development Notes
 
