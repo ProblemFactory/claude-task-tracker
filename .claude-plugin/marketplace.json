@@ -10,7 +10,7 @@
   "plugins": [
     {
       "name": "claude-task-tracker",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "source": "./plugin",
       "description": "Passive task tracking for Claude Code — observes conversations via hooks and maintains a global task database with web dashboard"
     }

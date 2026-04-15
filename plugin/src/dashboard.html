@@ -63,10 +63,15 @@ select { width:100%; padding:4px 8px; border-radius:4px; border:1px solid var(--
 .tag:hover { background:rgba(88,166,255,.25); }
 .priority-high { color:var(--red); }
 .priority-low { color:var(--text-dim); opacity:.6; }
-.origin-agent { opacity:.65; border-style:dashed; }
-.origin-badge { font-size:9px; padding:1px 5px; border-radius:3px; }
-.origin-badge.agent { background:rgba(209,134,22,.15); color:var(--orange); }
-.origin-badge.user { background:rgba(63,185,80,.1); color:var(--green); }
+.origin-agent { opacity:.6; border-style:dashed; }
+.origin-badge { font-size:9px; padding:1px 5px; border-radius:3px; cursor:default; }
+.origin-badge[title] { cursor:help; }
+.origin-badge.user_initiated { background:rgba(63,185,80,.12); color:var(--green); }
+.origin-badge.user_confirmed { background:rgba(63,185,80,.08); color:var(--green); opacity:.8; }
+.origin-badge.user_implicit { background:rgba(88,166,255,.1); color:var(--accent); }
+.origin-badge.agent_pending { background:rgba(209,134,22,.15); color:var(--orange); }
+.origin-badge.agent_ignored { background:rgba(139,148,158,.12); color:var(--text-dim); }
+.task-category { font-size:9px; padding:1px 5px; border-radius:3px; background:rgba(188,140,255,.1); color:var(--purple); }
 .task-id { font-size:11px; color:var(--text-dim); margin-top:4px; flex-shrink:0; }
 
 /* Expand area */
@@ -194,6 +199,7 @@ select { width:100%; padding:4px 8px; border-radius:4px; border:1px solid var(--
 <script>
 const API = `http://${location.host}`;
 let allTasks = [], allLinks = [], activeStatuses = new Set(['open','in_progress','blocked']), activePriorities = new Set(), activeTag = '', searchQuery = '';
+const ORIGIN_LABELS = { user_initiated:'requested', user_confirmed:'confirmed', user_implicit:'implicit', agent_pending:'pending', agent_ignored:'ignored' };
 let currentConfig = {}, defaultConfig = {};
 
 async function load() {
@@ -292,8 +298,10 @@ function getSubtasks(parentId) {
 function renderTaskCard(t) {
   const tags = (t.tags||[]).map(tag => `<span class="tag" onclick="event.stopPropagation();document.getElementById('tag-filter').value='${esc(tag)}';activeTag='${esc(tag)}';renderAll()">${esc(tag)}</span>`).join('');
   const prioClass = t.priority === 'high' ? 'priority-high' : t.priority === 'low' ? 'priority-low' : '';
-  const isAgent = t.origin === 'agent';
-  const originBadge = isAgent ? '<span class="origin-badge agent">agent</span>' : '';
+  const isAgent = (t.origin||'').startsWith('agent');
+  const originLabel = ORIGIN_LABELS[t.origin] || t.origin || '';
+  const originBadge = originLabel ? `<span class="origin-badge ${esc(t.origin)}" title="${esc(t.originReason||'')}">${originLabel}</span>` : '';
+  const categoryBadge = t.category ? `<span class="task-category">${esc(t.category)}</span>` : '';
   const date = (t.updatedAt||t.createdAt||'').slice(0,10);
   const notes = (t.notes||'').trim();
   const links = allLinks.filter(l => l.taskId === t.id);
@@ -317,7 +325,7 @@ function renderTaskCard(t) {
         <div class="task-status status-${s.status}"></div>
         <div class="subtask-body">
           <div class="subtask-title">${esc(s.title)}</div>
-          <div class="subtask-meta">#${s.id} &middot; ${sDate}${s.origin==='agent'?' &middot; <span class="origin-badge agent">agent</span>':''}${s.priority==='high'?' &middot; <span class="priority-high">high</span>':''}</div>
+          <div class="subtask-meta">#${s.id} &middot; ${sDate}${(s.origin||'').startsWith('agent')?' &middot; <span class="origin-badge '+(s.origin)+'" title="'+(esc(s.originReason||''))+'">'+(ORIGIN_LABELS[s.origin]||s.origin)+'</span>':''}${s.priority==='high'?' &middot; <span class="priority-high">high</span>':''}</div>
           ${sNotes ? `<div class="subtask-notes">${esc(sNotes)}</div>` : ''}
         </div>
       </div>`;
@@ -345,12 +353,13 @@ function renderTaskCard(t) {
     <div class="task-body">
       <div class="task-title">${esc(t.title)} ${subLabel}</div>
       <div class="task-meta">
-        ${originBadge}
+        ${originBadge}${categoryBadge}
         ${tags}
         ${cwdInfo ? `<span style="opacity:.5">${esc(cwdInfo)}</span>` : ''}
         <span class="${prioClass}">${t.priority||'normal'}</span>
         <span>${date}</span>
       </div>
+      ${t.context ? `<div style="font-size:11px;color:var(--text-dim);margin-top:2px">${esc(t.context)}</div>` : ''}
       ${hasExpand ? `<div class="task-expand">${subtaskHtml}${notesHtml}</div>` : ''}
     </div>
     <div class="task-id">#${t.id}</div>

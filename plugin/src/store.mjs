@@ -34,7 +34,10 @@ function initSchema(db) {
       notes TEXT DEFAULT '',
       tags TEXT DEFAULT '[]',
       parent_id INTEGER,
-      origin TEXT NOT NULL DEFAULT 'user',
+      origin TEXT NOT NULL DEFAULT 'user_initiated',
+      origin_reason TEXT DEFAULT '',
+      category TEXT DEFAULT '',
+      context TEXT DEFAULT '',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       completed_at TEXT,
@@ -67,11 +70,19 @@ function initSchema(db) {
 }
 
 function migrateSchema(db) {
-  // Add origin column if missing (upgrade from < 1.3.0)
   const cols = db.prepare("PRAGMA table_info(tasks)").all();
-  if (!cols.some(c => c.name === 'origin')) {
-    db.exec("ALTER TABLE tasks ADD COLUMN origin TEXT NOT NULL DEFAULT 'user'");
+  const has = name => cols.some(c => c.name === name);
+  // v1.3.0: origin
+  if (!has('origin')) db.exec("ALTER TABLE tasks ADD COLUMN origin TEXT NOT NULL DEFAULT 'user_initiated'");
+  // v1.3.0→1.4.0: migrate old origin values
+  if (has('origin')) {
+    db.exec("UPDATE tasks SET origin = 'user_initiated' WHERE origin = 'user'");
+    db.exec("UPDATE tasks SET origin = 'agent_pending' WHERE origin = 'agent'");
   }
+  // v1.4.0: new structured fields
+  if (!has('origin_reason')) db.exec("ALTER TABLE tasks ADD COLUMN origin_reason TEXT DEFAULT ''");
+  if (!has('category')) db.exec("ALTER TABLE tasks ADD COLUMN category TEXT DEFAULT ''");
+  if (!has('context')) db.exec("ALTER TABLE tasks ADD COLUMN context TEXT DEFAULT ''");
 }
 
 function migrateFromJson(db) {
@@ -146,13 +157,14 @@ export function getSubtasks(parentId) {
   return db.prepare('SELECT * FROM tasks WHERE parent_id = ?').all(parentId).map(rowToTask);
 }
 
-export function createTask({ title, status, priority, notes, tags, parentId, origin }) {
+export function createTask({ title, status, priority, notes, tags, parentId, origin, originReason, category, context }) {
   const db = getDb();
   const now = new Date().toISOString();
   const result = db.prepare(`
-    INSERT INTO tasks (title, status, priority, notes, tags, parent_id, origin, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(title, status || 'open', priority || 'normal', notes || '', JSON.stringify(tags || []), parentId || null, origin || 'user', now, now);
+    INSERT INTO tasks (title, status, priority, notes, tags, parent_id, origin, origin_reason, category, context, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(title, status || 'open', priority || 'normal', notes || '', JSON.stringify(tags || []),
+    parentId || null, origin || 'user_initiated', originReason || '', category || '', context || '', now, now);
   return Number(result.lastInsertRowid);
 }
 
@@ -253,7 +265,10 @@ function rowToTask(row) {
     notes: row.notes,
     tags: JSON.parse(row.tags || '[]'),
     parentId: row.parent_id,
-    origin: row.origin || 'user',
+    origin: row.origin || 'user_initiated',
+    originReason: row.origin_reason || '',
+    category: row.category || '',
+    context: row.context || '',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,

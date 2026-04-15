@@ -114,27 +114,41 @@ async function runAnalysis(job) {
       }).join('\n')
     : '(no tasks yet)';
 
-  const prompt = `You are a task tracker analyzing development conversations.
+  const prompt = `You are a task tracker analyzing development conversations. Be thorough — extract as much structured information as possible.
 
 GLOBAL task list — tasks are NOT tied to folders. Same feature may span sessions.
 Match work to existing tasks by SEMANTIC similarity. "task" = meaningful work unit.
 Don't create tasks for greetings, clarifications, routine git ops.
 Only update status with CLEAR evidence.
-Titles: 5-12 words. Tags: project/area.
-Analytical tasks (review, research) with conclusions → mark done.
+
+## Task fields
+- title: 5-15 words, specific and descriptive
+- tags: project name, area, technology (multiple encouraged)
+- category: bugfix | feature | refactor | research | devops | review | documentation | support
+- context: 1-2 sentences of WHY this task exists, what problem it solves, or what it enables
+- notes: factual log entries, each prefixed with date
 
 ## Subtasks
-Large tasks should be broken into subtasks. Use parent_id to link subtasks to parents.
+Break large tasks into subtasks aggressively. Use parent_id to link.
 - If conversation reveals sub-work of an existing task, create subtasks under it.
-- A parent task's status reflects overall progress; subtasks track individual pieces.
-- Don't nest more than 2 levels deep.
-- When ALL subtasks of a parent are done, mark the parent done too.
+- Parent status reflects overall progress; subtasks track individual pieces.
+- Max 2 levels deep. When ALL subtasks done → mark parent done.
+
+## Origin classification (CRITICAL — be precise)
+Each task and update MUST have an origin + origin_reason:
+
+- "user_initiated" — User explicitly asked for this. Evidence: user said "please do X", "I need X", "let's build X"
+- "user_confirmed" — Agent proposed it and user explicitly agreed. Evidence: user said "yes", "go ahead", "sounds good", "确定", "好的"
+- "user_implicit" — Agent proposed/did it and user continued engaging without objecting. Evidence: user asked follow-up questions about it, used the result, or gave related instructions
+- "agent_pending" — Agent proposed or started this, user hasn't responded yet (this is the LAST message in the conversation, no user reply follows)
+- "agent_ignored" — Agent proposed this earlier but user's subsequent messages didn't acknowledge it at all
+
+origin_reason: One sentence explaining your classification with specific evidence from the conversation.
+
+For UPDATES to existing tasks: if a task was "agent_pending" and user now engages with it → upgrade to "user_confirmed" or "user_implicit". If user's subsequent messages ignore it → downgrade to "agent_ignored".
 
 Status: open | in_progress | done | blocked
 Priority: low | normal | high
-Origin: user | agent
-- "user" = user explicitly requested, initiated, or agreed to this work
-- "agent" = Claude proposed/started this without explicit user request or confirmation
 
 ## Current Open Tasks
 ${taskList}
@@ -145,10 +159,8 @@ ${taskList}
 ${summary.slice(0, cfg.maxPromptChars)}
 
 Respond with ONLY JSON:
-{"updates":[{"task_id":N,"status":"...","notes":"brief","origin":"user"}],"new_tasks":[{"title":"...","status":"in_progress","priority":"normal","tags":["project"],"notes":"brief","parent_id":null,"origin":"user"}],"session_summary":"one line"}
-
-parent_id: set to an existing task ID to create a subtask, or null for a top-level task.
-${cfg.language && cfg.language !== 'auto' ? `\nIMPORTANT: Write ALL task titles, notes, and session_summary in ${cfg.language}.` : '\nIMPORTANT: Write task titles, notes, and session_summary in the SAME language the user uses in the conversation. If the user writes in Chinese, respond in Chinese. If in English, respond in English. Match their language.'}`;
+{"updates":[{"task_id":N,"status":"...","notes":"log entry","origin":"user_initiated","origin_reason":"user asked to fix the bug in message 3"}],"new_tasks":[{"title":"...","status":"in_progress","priority":"normal","tags":["project","area"],"category":"feature","context":"why this task exists","notes":"what happened","parent_id":null,"origin":"user_initiated","origin_reason":"user explicitly requested this"}],"session_summary":"one line"}
+${cfg.language && cfg.language !== 'auto' ? `\nIMPORTANT: Write ALL text fields in ${cfg.language}.` : '\nIMPORTANT: Write all text fields in the SAME language the user uses in the conversation.'}`;
 
   if (!queryFn) { log('No SDK available, skipping analysis'); return; }
 
@@ -227,6 +239,8 @@ function applyResult(result, sessionId, cwd) {
   const now = new Date().toISOString();
   const today = now.slice(0, 10);
 
+  const VALID_ORIGINS = ['user_initiated', 'user_confirmed', 'user_implicit', 'agent_pending', 'agent_ignored'];
+
   for (const u of result.updates || []) {
     const task = getTaskById(u.task_id);
     if (!task) continue;
@@ -234,8 +248,13 @@ function applyResult(result, sessionId, cwd) {
     if (u.status) updates.status = u.status;
     if (u.notes) updates.notes = (task.notes ? task.notes + '\n' : '') + `[${today}] ${u.notes}`;
     if (u.status === 'done') updates.completedAt = now;
-    // Upgrade origin: if user now engages with an agent-proposed task, it becomes user-confirmed
-    if (task.origin === 'agent' && u.origin === 'user') updates.origin = 'user';
+    // Origin transitions
+    if (u.origin && VALID_ORIGINS.includes(u.origin)) {
+      const cur = task.origin;
+      // Only allow upgrades (agent_* → user_*), never downgrade user_initiated
+      if (cur !== 'user_initiated') updates.origin = u.origin;
+      if (u.origin_reason) updates.origin_reason = u.origin_reason;
+    }
     updateTask(task.id, updates);
     addSessionLink({ taskId: task.id, sessionId, project: cwd, role: u.status === 'done' ? 'completed' : 'progressed', summary: u.notes });
   }
@@ -249,10 +268,12 @@ function applyResult(result, sessionId, cwd) {
       const parent = getTaskById(parentId);
       if (parent?.tags?.length) tags = [...parent.tags];
     }
-    const origin = (n.origin === 'agent') ? 'agent' : 'user';
+    const origin = VALID_ORIGINS.includes(n.origin) ? n.origin : 'user_initiated';
     const id = createTask({
       title: n.title, status: n.status || 'open', priority: n.priority || 'normal',
-      notes: n.notes ? `[${today}] ${n.notes}` : '', tags, parentId, origin,
+      notes: n.notes ? `[${today}] ${n.notes}` : '', tags, parentId,
+      origin, originReason: n.origin_reason || '',
+      category: n.category || '', context: n.context || '',
     });
     addSessionLink({ taskId: id, sessionId, project: cwd, role: 'created', summary: n.notes });
   }
