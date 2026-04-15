@@ -370,15 +370,21 @@ function renderTasks() {
   const filtered = filterTasks();
   const main = document.getElementById('main');
 
-  // Only show root tasks (non-subtasks) at top level; subtasks shown inline
-  const rootFiltered = filtered.filter(t => !t.parentId);
-  // Also include subtasks whose parent didn't pass filters
-  const parentIds = new Set(rootFiltered.map(t => t.id));
-  const orphanSubs = filtered.filter(t => t.parentId && !parentIds.has(t.parentId));
+  // Root tasks only at top level — subtasks always rendered inside their parent card
+  // A root task is shown if it passes filters OR if any of its subtasks pass filters
+  const allIds = new Set(allTasks.map(t => t.id));
+  const rootTasks = filtered.filter(t => !t.parentId);
+  // Also pull in parents whose subtasks matched the filter but parent didn't
+  const matchedSubParents = new Set();
+  filtered.filter(t => t.parentId).forEach(t => {
+    if (!rootTasks.some(r => r.id === t.parentId)) matchedSubParents.add(t.parentId);
+  });
+  for (const pid of matchedSubParents) {
+    const parent = allTasks.find(t => t.id === pid);
+    if (parent && !rootTasks.some(r => r.id === pid)) rootTasks.push(parent);
+  }
 
-  const displayTasks = [...rootFiltered, ...orphanSubs];
-
-  if (!displayTasks.length) {
+  if (!rootTasks.length) {
     main.innerHTML = `<div class="empty"><h2>No tasks match</h2><p>Adjust filters or wait for the tracker to observe your sessions.</p></div>`;
     return;
   }
@@ -392,11 +398,11 @@ function renderTasks() {
 
   let html = '';
   for (const [status, label] of groups) {
-    const tasks = displayTasks.filter(t => t.status === status);
+    const tasks = rootTasks.filter(t => t.status === status);
     if (!tasks.length) continue;
     html += `<div class="section"><div class="section-header"><span>${label}</span><span class="section-count">${tasks.length}</span></div><div class="task-grid">`;
     for (const t of tasks.sort((a,b) => (b.updatedAt||'').localeCompare(a.updatedAt||''))) {
-      html += renderTaskCard(t, false);
+      html += renderTaskCard(t);
     }
     html += '</div></div>';
   }
