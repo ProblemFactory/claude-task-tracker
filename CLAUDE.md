@@ -39,7 +39,10 @@ All at `~/.claude/task-tracker/`:
 - **Observer session isolation** — SDK query() gets `cwd: observer-sessions/` to prevent polluting user's project directories with session files.
 - **SQLite over JSON** — Switched from data.json to node:sqlite (Node >= 22) for indexed queries and no full-file rewrite on every operation. Auto-migrates from data.json on first run.
 - **Subtask hierarchy** — Tasks have `parentId` field. AI prompt instructs to break large tasks into subtasks. Parent auto-completes when all subtasks are done. Max 2 levels deep.
-- **Global tasks** — Tasks are NOT tied to folders. AI matches work to existing tasks by semantic similarity across sessions and projects.
+- **Global tasks** — Tasks are NOT tied to folders. AI matches work to existing tasks by semantic similarity across sessions and projects. Context field stores rich descriptions to improve matching.
+- **5-level origin tracking** — Distinguishes user_initiated, user_confirmed, user_implicit, agent_pending, agent_ignored. Each with origin_reason explaining the classification evidence. Origin can upgrade (agent_pending → user_confirmed) but never downgrade user_initiated.
+- **Rich task metadata** — category (bugfix/feature/refactor/research/devops/review/docs/support), context (why task exists, what's involved, key files, decisions), context_append on updates for evolving history.
+- **Auto-restart on update** — Hook reads plugin.json version, compares with worker /health version. Mismatch triggers automatic shutdown + respawn. Users never need manual restarts after `claude plugins update`.
 
 ## Development Notes
 
@@ -49,6 +52,9 @@ All at `~/.claude/task-tracker/`:
 - Worker binds to `0.0.0.0` by default (LAN accessible). Change `host` config for local-only.
 - Analysis skipped if conversation delta < `minDeltaChars` (default 2000) to avoid noise
 - All AI disallowed tools: Bash, Read, Write, Edit, Grep, Glob, WebFetch, WebSearch, TodoWrite, NotebookEdit, Agent
+- `language` config: 'auto' (match user's language) or explicit (e.g. 'Chinese')
+- Version bump required for every release: both `plugin/.claude-plugin/plugin.json` AND `.claude-plugin/marketplace.json`
+- Schema migrations in `migrateSchema()` run on every startup, adding new columns with defaults for existing DBs
 
 ## Distribution
 

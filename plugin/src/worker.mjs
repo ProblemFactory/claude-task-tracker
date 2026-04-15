@@ -109,8 +109,9 @@ async function runAnalysis(job) {
         const indent = t.parentId ? '  ' : '';
         const parent = t.parentId ? ` (subtask of #${t.parentId})` : '';
         const subs = getSubtasks(t.id).filter(s => s.status !== 'done');
-        const subInfo = subs.length ? ` [${subs.length} subtasks]` : '';
-        return `${indent}[#${t.id}] "${t.title}" (${t.status}) [${t.tags.join(',')}]${parent}${subInfo}`;
+        const subInfo = subs.length ? ` [${subs.length} active subtasks]` : '';
+        const ctx = t.context ? ` — ${t.context.slice(0, 150)}` : '';
+        return `${indent}[#${t.id}] "${t.title}" (${t.status}/${t.origin}) [${t.tags.join(',')}]${parent}${subInfo}${ctx}`;
       }).join('\n')
     : '(no tasks yet)';
 
@@ -125,8 +126,16 @@ Only update status with CLEAR evidence.
 - title: 5-15 words, specific and descriptive
 - tags: project name, area, technology (multiple encouraged)
 - category: bugfix | feature | refactor | research | devops | review | documentation | support
-- context: 1-2 sentences of WHY this task exists, what problem it solves, or what it enables
-- notes: factual log entries, each prefixed with date
+- context: Rich description including ALL of the following that apply:
+  * WHY this task exists — what problem, request, or goal triggered it
+  * WHAT is being built/fixed/changed — technical specifics
+  * WHO/WHAT is involved — services, APIs, libraries, people, teams mentioned
+  * KEY FILES touched or discussed — paths, modules, components
+  * DEPENDENCIES or BLOCKERS — what this depends on or blocks
+  * ACCEPTANCE CRITERIA — how to know when it's done, if mentioned
+  * DECISIONS MADE — architectural choices, trade-offs discussed
+  Write 2-5 sentences. This field is used to match future conversations to existing tasks, so include distinctive keywords and specifics.
+- notes: Factual timestamped log. For UPDATES, append what changed this session. Be specific: mention file names, function names, error messages, commands run, decisions made. Each entry should be self-contained enough to understand without reading previous entries.
 
 ## Subtasks
 Break large tasks into subtasks aggressively. Use parent_id to link.
@@ -159,7 +168,7 @@ ${taskList}
 ${summary.slice(0, cfg.maxPromptChars)}
 
 Respond with ONLY JSON:
-{"updates":[{"task_id":N,"status":"...","notes":"log entry","origin":"user_initiated","origin_reason":"user asked to fix the bug in message 3"}],"new_tasks":[{"title":"...","status":"in_progress","priority":"normal","tags":["project","area"],"category":"feature","context":"why this task exists","notes":"what happened","parent_id":null,"origin":"user_initiated","origin_reason":"user explicitly requested this"}],"session_summary":"one line"}
+{"updates":[{"task_id":N,"status":"...","notes":"[date] specific changes: files modified, decisions made, outcomes","origin":"user_initiated","origin_reason":"evidence","context_append":"new context info discovered this session (optional, appended to existing)"}],"new_tasks":[{"title":"...","status":"in_progress","priority":"normal","tags":["project","area","tech"],"category":"feature","context":"Rich: why it exists + what's involved + key files + decisions. 2-5 sentences.","notes":"[date] what happened","parent_id":null,"origin":"user_initiated","origin_reason":"evidence"}],"session_summary":"one line"}
 ${cfg.language && cfg.language !== 'auto' ? `\nIMPORTANT: Write ALL text fields in ${cfg.language}.` : '\nIMPORTANT: Write all text fields in the SAME language the user uses in the conversation.'}`;
 
   if (!queryFn) { log('No SDK available, skipping analysis'); return; }
@@ -248,6 +257,10 @@ function applyResult(result, sessionId, cwd) {
     if (u.status) updates.status = u.status;
     if (u.notes) updates.notes = (task.notes ? task.notes + '\n' : '') + `[${today}] ${u.notes}`;
     if (u.status === 'done') updates.completedAt = now;
+    // Append new context discovered this session
+    if (u.context_append) {
+      updates.context = (task.context ? task.context + ' ' : '') + u.context_append;
+    }
     // Origin transitions
     if (u.origin && VALID_ORIGINS.includes(u.origin)) {
       const cur = task.origin;
