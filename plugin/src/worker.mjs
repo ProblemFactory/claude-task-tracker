@@ -137,7 +137,8 @@ ${summary.slice(0, cfg.maxPromptChars)}
 Respond with ONLY JSON:
 {"updates":[{"task_id":N,"status":"...","notes":"brief"}],"new_tasks":[{"title":"...","status":"in_progress","priority":"normal","tags":["project"],"notes":"brief","parent_id":null}],"session_summary":"one line"}
 
-parent_id: set to an existing task ID to create a subtask, or null for a top-level task.`;
+parent_id: set to an existing task ID to create a subtask, or null for a top-level task.
+${cfg.language && cfg.language !== 'auto' ? `\nIMPORTANT: Write ALL task titles, notes, and session_summary in ${cfg.language}.` : ''}`;
 
   if (!queryFn) { log('No SDK available, skipping analysis'); return; }
 

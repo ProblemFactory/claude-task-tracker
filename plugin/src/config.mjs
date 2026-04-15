@@ -26,6 +26,9 @@ const DEFAULTS = {
   recentSessionsLimit: 10,
   recentCompletedLimit: 20,
 
+  // Language
+  language: 'auto',
+
   // Dashboard
   autoRefreshInterval: 15000,
 };

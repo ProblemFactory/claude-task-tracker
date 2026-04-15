@@ -296,7 +296,9 @@ function renderTaskCard(t) {
   const subtasks = getSubtasks(t.id);
   const subDone = subtasks.filter(s => s.status === 'done').length;
   const subTotal = subtasks.length;
-  const subLabel = subTotal ? `<span class="subtask-toggle">${subDone}/${subTotal} subtasks</span>` : '';
+  const subLabel = subTotal
+    ? `<span class="subtask-toggle">${subDone === subTotal ? '\u2713 ' : ''}${subDone} of ${subTotal} done</span>`
+    : '';
 
   // Subtask list — each subtask expandable for its own notes
   let subtaskHtml = '';
@@ -416,6 +418,7 @@ const SETTINGS_SCHEMA = [
     { key: 'model', label: 'Model', hint: 'Claude model for analysis', type: 'select', options: ['haiku','sonnet','opus'] },
     { key: 'analysisTimeout', label: 'Timeout (ms)', hint: 'Max wait for AI response', type: 'number', min: 5000, max: 120000 },
     { key: 'maxTurns', label: 'Max Turns', type: 'number', min: 1, max: 5 },
+    { key: 'language', label: 'Language', hint: 'auto = match conversation language', type: 'select', options: ['auto','English','Chinese','Japanese','Korean','Spanish','French','German','Portuguese','Russian'] },
   ]},
   { section: 'Analysis Thresholds', fields: [
     { key: 'minDeltaChars', label: 'Min Delta (chars)', hint: 'Skip analysis if conversation delta is shorter', type: 'number', min: 0 },
