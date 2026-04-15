@@ -68,6 +68,17 @@ select { width:100%; padding:4px 8px; border-radius:4px; border:1px solid var(--
 
 .task-id { font-size:11px; color:var(--text-dim); margin-top:4px; flex-shrink:0; }
 
+/* Subtasks */
+.subtask-list { margin-top:6px; padding-left:20px; border-left:2px solid var(--border); }
+.subtask-item { display:flex; align-items:center; gap:8px; padding:4px 0; font-size:12px; }
+.subtask-item .task-status { width:8px; height:8px; }
+.subtask-title { color:var(--text); }
+.subtask-meta { font-size:10px; color:var(--text-dim); }
+.subtask-toggle { font-size:10px; color:var(--accent); cursor:pointer; margin-left:4px; }
+.subtask-toggle:hover { text-decoration:underline; }
+.task-card .subtask-list { max-height:0; overflow:hidden; transition:max-height .2s; }
+.task-card.expanded .subtask-list { max-height:1000px; }
+
 /* Section headers */
 .section { margin-bottom:20px; }
 .section-header { font-size:12px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.5px; margin-bottom:8px; padding-bottom:4px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; }
@@ -258,11 +269,68 @@ function filterTasks() {
   });
 }
 
+function getSubtasks(parentId) {
+  return allTasks.filter(t => t.parentId === parentId);
+}
+
+function renderTaskCard(t, isSubtask) {
+  const tags = (t.tags||[]).map(tag => `<span class="tag" onclick="event.stopPropagation();document.getElementById('tag-filter').value='${esc(tag)}';activeTag='${esc(tag)}';renderAll()">${esc(tag)}</span>`).join('');
+  const prioClass = t.priority === 'high' ? 'priority-high' : t.priority === 'low' ? 'priority-low' : '';
+  const date = (t.updatedAt||t.createdAt||'').slice(0,10);
+  const notes = (t.notes||'').trim();
+  const links = allLinks.filter(l => l.taskId === t.id);
+  const cwds = [...new Set(links.map(l => l.project).filter(Boolean))];
+  const cwdInfo = cwds.length ? cwds.map(c => { const p = c.split('/'); return p[p.length-1]||p[p.length-2]; }).join(', ') : '';
+  const subtasks = getSubtasks(t.id);
+  const subDone = subtasks.filter(s => s.status === 'done').length;
+  const subTotal = subtasks.length;
+  const subLabel = subTotal ? `<span class="subtask-toggle">${subDone}/${subTotal} subtasks</span>` : '';
+
+  let subtaskHtml = '';
+  if (subTotal) {
+    subtaskHtml = '<div class="subtask-list">';
+    for (const s of subtasks.sort((a,b) => (a.status==='done'?1:0)-(b.status==='done'?1:0) || (b.updatedAt||'').localeCompare(a.updatedAt||''))) {
+      const sDate = (s.updatedAt||s.createdAt||'').slice(0,10);
+      const sNotes = (s.notes||'').trim();
+      subtaskHtml += `<div class="subtask-item">
+        <div class="task-status status-${s.status}"></div>
+        <span class="subtask-title">${esc(s.title)}</span>
+        <span class="subtask-meta">#${s.id} ${sDate}</span>
+      </div>`;
+    }
+    subtaskHtml += '</div>';
+  }
+
+  return `<div class="task-card" onclick="this.classList.toggle('expanded')">
+    <div class="task-status status-${t.status}"></div>
+    <div class="task-body">
+      <div class="task-title">${esc(t.title)} ${subLabel}</div>
+      <div class="task-meta">
+        ${tags}
+        ${cwdInfo ? `<span style="opacity:.5">${esc(cwdInfo)}</span>` : ''}
+        <span class="${prioClass}">${t.priority||'normal'}</span>
+        <span>${date}</span>
+      </div>
+      ${notes ? `<div class="task-notes">${esc(notes)}</div>` : ''}
+      ${subtaskHtml}
+    </div>
+    <div class="task-id">#${t.id}</div>
+  </div>`;
+}
+
 function renderTasks() {
   const filtered = filterTasks();
   const main = document.getElementById('main');
 
-  if (!filtered.length) {
+  // Only show root tasks (non-subtasks) at top level; subtasks shown inline
+  const rootFiltered = filtered.filter(t => !t.parentId);
+  // Also include subtasks whose parent didn't pass filters
+  const parentIds = new Set(rootFiltered.map(t => t.id));
+  const orphanSubs = filtered.filter(t => t.parentId && !parentIds.has(t.parentId));
+
+  const displayTasks = [...rootFiltered, ...orphanSubs];
+
+  if (!displayTasks.length) {
     main.innerHTML = `<div class="empty"><h2>No tasks match</h2><p>Adjust filters or wait for the tracker to observe your sessions.</p></div>`;
     return;
   }
@@ -276,32 +344,11 @@ function renderTasks() {
 
   let html = '';
   for (const [status, label] of groups) {
-    const tasks = filtered.filter(t => t.status === status);
+    const tasks = displayTasks.filter(t => t.status === status);
     if (!tasks.length) continue;
     html += `<div class="section"><div class="section-header"><span>${label}</span><span class="section-count">${tasks.length}</span></div><div class="task-grid">`;
     for (const t of tasks.sort((a,b) => (b.updatedAt||'').localeCompare(a.updatedAt||''))) {
-      const tags = (t.tags||[]).map(tag => `<span class="tag" onclick="event.stopPropagation();document.getElementById('tag-filter').value='${esc(tag)}';activeTag='${esc(tag)}';renderAll()">${esc(tag)}</span>`).join('');
-      const prioClass = t.priority === 'high' ? 'priority-high' : t.priority === 'low' ? 'priority-low' : '';
-      const date = (t.updatedAt||t.createdAt||'').slice(0,10);
-      const notes = (t.notes||'').trim();
-      const links = allLinks.filter(l => l.taskId === t.id);
-      const cwds = [...new Set(links.map(l => l.project).filter(Boolean))];
-      const cwdInfo = cwds.length ? cwds.map(c => { const p = c.split('/'); return p[p.length-1]||p[p.length-2]; }).join(', ') : '';
-
-      html += `<div class="task-card" onclick="this.classList.toggle('expanded')">
-        <div class="task-status status-${t.status}"></div>
-        <div class="task-body">
-          <div class="task-title">${esc(t.title)}</div>
-          <div class="task-meta">
-            ${tags}
-            ${cwdInfo ? `<span style="opacity:.5">${esc(cwdInfo)}</span>` : ''}
-            <span class="${prioClass}">${t.priority||'normal'}</span>
-            <span>${date}</span>
-          </div>
-          ${notes ? `<div class="task-notes">${esc(notes)}</div>` : ''}
-        </div>
-        <div class="task-id">#${t.id}</div>
-      </div>`;
+      html += renderTaskCard(t, false);
     }
     html += '</div></div>';
   }

@@ -125,7 +125,13 @@ async function main(input) {
     const data = loadData();
     const active = data.tasks.filter(t => t.status !== 'done');
     if (active.length) {
-      const lines = active.map(t => `- #${t.id} ${t.title} (${t.status}) [${t.tags.join(', ')}]`);
+      const roots = active.filter(t => !t.parentId);
+      const lines = [];
+      for (const t of roots) {
+        lines.push(`- #${t.id} ${t.title} (${t.status}) [${t.tags.join(', ')}]`);
+        const subs = active.filter(s => s.parentId === t.id);
+        for (const s of subs) lines.push(`  - #${s.id} ${s.title} (${s.status})`);
+      }
       return { additionalContext: `# Active Tasks (task-tracker)\n${lines.join('\n')}` };
     }
     return null;

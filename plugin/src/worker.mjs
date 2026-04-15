@@ -90,7 +90,13 @@ async function runAnalysis(job) {
 
   const openTasks = data.tasks.filter(t => t.status !== 'done');
   const taskList = openTasks.length
-    ? openTasks.map(t => `[#${t.id}] "${t.title}" (${t.status}) [${t.tags.join(',')}]`).join('\n')
+    ? openTasks.map(t => {
+        const indent = t.parentId ? '  ' : '';
+        const parent = t.parentId ? ` (subtask of #${t.parentId})` : '';
+        const subs = data.tasks.filter(s => s.parentId === t.id && s.status !== 'done');
+        const subInfo = subs.length ? ` [${subs.length} subtasks]` : '';
+        return `${indent}[#${t.id}] "${t.title}" (${t.status}) [${t.tags.join(',')}]${parent}${subInfo}`;
+      }).join('\n')
     : '(no tasks yet)';
 
   const prompt = `You are a task tracker analyzing development conversations.
@@ -101,6 +107,13 @@ Don't create tasks for greetings, clarifications, routine git ops.
 Only update status with CLEAR evidence.
 Titles: 5-12 words. Tags: project/area.
 Analytical tasks (review, research) with conclusions → mark done.
+
+## Subtasks
+Large tasks should be broken into subtasks. Use parent_id to link subtasks to parents.
+- If conversation reveals sub-work of an existing task, create subtasks under it.
+- A parent task's status reflects overall progress; subtasks track individual pieces.
+- Don't nest more than 2 levels deep.
+- When ALL subtasks of a parent are done, mark the parent done too.
 
 Status: open | in_progress | done | blocked
 Priority: low | normal | high
@@ -114,7 +127,9 @@ ${taskList}
 ${summary.slice(0, cfg.maxPromptChars)}
 
 Respond with ONLY JSON:
-{"updates":[{"task_id":N,"status":"...","notes":"brief"}],"new_tasks":[{"title":"...","status":"in_progress","priority":"normal","tags":["project"],"notes":"brief"}],"session_summary":"one line"}`;
+{"updates":[{"task_id":N,"status":"...","notes":"brief"}],"new_tasks":[{"title":"...","status":"in_progress","priority":"normal","tags":["project"],"notes":"brief","parent_id":null}],"session_summary":"one line"}
+
+parent_id: set to an existing task ID to create a subtask, or null for a top-level task.`;
 
   if (!queryFn) { log('No SDK available, skipping analysis'); return; }
 
@@ -203,13 +218,39 @@ function applyResult(data, result, sessionId, cwd) {
   for (const n of result.new_tasks || []) {
     if (!n.title) continue;
     if (data.tasks.some(t => t.title.toLowerCase() === n.title.toLowerCase())) continue;
+    // Validate parent_id if provided
+    const parentId = n.parent_id && data.tasks.some(t => t.id === n.parent_id) ? n.parent_id : null;
     const id = data.nextId++;
     data.tasks.push({
       id, title: n.title, status: n.status || 'open', priority: n.priority || 'normal',
       notes: n.notes ? `[${new Date().toISOString().slice(0, 10)}] ${n.notes}` : '',
-      tags: n.tags || [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), completedAt: null,
+      tags: n.tags || [], parentId, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), completedAt: null,
     });
+    // Inherit tags from parent if subtask has none
+    if (parentId && (!n.tags || !n.tags.length)) {
+      const parent = data.tasks.find(t => t.id === parentId);
+      if (parent?.tags?.length) data.tasks[data.tasks.length - 1].tags = [...parent.tags];
+    }
     addLink(data, id, sessionId, cwd, 'created', n.notes);
+  }
+  // Auto-complete parents when all subtasks are done
+  for (const u of result.updates || []) {
+    if (u.status === 'done') {
+      const task = data.tasks.find(t => t.id === u.task_id);
+      if (task?.parentId) {
+        const siblings = data.tasks.filter(t => t.parentId === task.parentId);
+        if (siblings.length && siblings.every(t => t.status === 'done')) {
+          const parent = data.tasks.find(t => t.id === task.parentId);
+          if (parent && parent.status !== 'done') {
+            parent.status = 'done';
+            parent.completedAt = new Date().toISOString();
+            parent.updatedAt = new Date().toISOString();
+            parent.notes = (parent.notes ? parent.notes + '\n' : '') + `[${new Date().toISOString().slice(0, 10)}] All subtasks completed`;
+            addLink(data, parent.id, sessionId, cwd, 'completed', 'All subtasks completed');
+          }
+        }
+      }
+    }
   }
 }
 
@@ -297,7 +338,16 @@ const server = http.createServer(async (req, res) => {
     const data = loadData();
     const active = data.tasks.filter(t => t.status !== 'done');
     if (!active.length) { res.end(JSON.stringify({ context: null })); return; }
-    const lines = active.map(t => `- #${t.id} ${t.title} (${t.status}) [${t.tags.join(', ')}]`);
+    const roots = active.filter(t => !t.parentId);
+    const lines = [];
+    for (const t of roots) {
+      lines.push(`- #${t.id} ${t.title} (${t.status}) [${t.tags.join(', ')}]`);
+      const subs = active.filter(s => s.parentId === t.id);
+      for (const s of subs) lines.push(`  - #${s.id} ${s.title} (${s.status})`);
+    }
+    // Include orphaned subtasks whose parent is done
+    const orphans = active.filter(t => t.parentId && !roots.some(r => r.id === t.parentId));
+    for (const t of orphans) lines.push(`- #${t.id} ${t.title} (${t.status}) [${t.tags.join(', ')}]`);
     res.end(JSON.stringify({ context: `# Active Tasks (task-tracker)\n${lines.join('\n')}` }));
     return;
   }

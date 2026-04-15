@@ -39,14 +39,39 @@ export function renderMarkdown(data) {
     if (status === 'done') tasks = tasks.slice(-config.recentCompletedLimit);
     if (!tasks.length) continue;
 
+    // Separate roots and subtasks
+    const roots = tasks.filter(t => !t.parentId);
+    const subtaskMap = {};
+    for (const t of tasks) {
+      if (t.parentId) {
+        if (!subtaskMap[t.parentId]) subtaskMap[t.parentId] = [];
+        subtaskMap[t.parentId].push(t);
+      }
+    }
+
     lines.push(`## ${label}`, '');
     lines.push('| ID | Task | Tags | Updated | Notes |');
     lines.push('|----|------|------|---------|-------|');
-    for (const t of tasks) {
+    for (const t of roots) {
       const tags = t.tags.length ? t.tags.join(', ') : '';
       const date = (t.updatedAt || t.createdAt || '').slice(0, 10);
       const note = (t.notes || '').split('\n').pop().slice(0, 80);
-      lines.push(`| #${t.id} | ${t.title} | ${tags} | ${date} | ${note} |`);
+      const subCount = (subtaskMap[t.id] || []).length;
+      const subLabel = subCount ? ` (${subCount} subtasks)` : '';
+      lines.push(`| #${t.id} | ${t.title}${subLabel} | ${tags} | ${date} | ${note} |`);
+      for (const s of subtaskMap[t.id] || []) {
+        const sDate = (s.updatedAt || s.createdAt || '').slice(0, 10);
+        const sNote = (s.notes || '').split('\n').pop().slice(0, 60);
+        lines.push(`| | \u2514 #${s.id} ${s.title} | | ${sDate} | ${sNote} |`);
+      }
+    }
+    // Orphaned subtasks (parent in different status group)
+    const orphans = tasks.filter(t => t.parentId && !roots.some(r => r.id === t.parentId));
+    for (const t of orphans) {
+      const tags = t.tags.length ? t.tags.join(', ') : '';
+      const date = (t.updatedAt || t.createdAt || '').slice(0, 10);
+      const note = (t.notes || '').split('\n').pop().slice(0, 80);
+      lines.push(`| #${t.id} | \u2514 ${t.title} (of #${t.parentId}) | ${tags} | ${date} | ${note} |`);
     }
     lines.push('');
   }
