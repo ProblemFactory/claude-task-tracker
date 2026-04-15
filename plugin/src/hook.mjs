@@ -18,6 +18,9 @@ try {
   CURRENT_VERSION = pluginJson.version;
 } catch {}
 
+// Cached observer cwd from worker health — used to filter out our own SDK sessions
+let _observerCwd = null;
+
 function log(msg) {
   try {
     mkdirSync(DIR, { recursive: true });
@@ -87,6 +90,7 @@ async function ensureWorker() {
   if (isWorkerAlive()) {
     const health = await workerGet('/health');
     if (health?.status === 'ok') {
+      if (health.observerCwd) _observerCwd = health.observerCwd;
       // Check version — restart if worker is running stale code
       if (health.version && CURRENT_VERSION !== 'unknown' && health.version !== CURRENT_VERSION) {
         log(`Worker version ${health.version} != plugin ${CURRENT_VERSION}, restarting`);
@@ -101,7 +105,10 @@ async function ensureWorker() {
   for (let i = 0; i < 6; i++) {
     await new Promise(r => setTimeout(r, 500));
     const health = await workerGet('/health');
-    if (health?.status === 'ok') return true;
+    if (health?.status === 'ok') {
+      if (health.observerCwd) _observerCwd = health.observerCwd;
+      return true;
+    }
   }
   log('Worker failed to start');
   return false;
@@ -133,9 +140,10 @@ setTimeout(() => process.exit(0), 8000);
 async function main(input) {
   const event = input.hook_event_name;
 
-  // Guard: skip if this session is from our own SDK analysis (prevents infinite loop)
-  // SDK query() runs with cwd=~/.claude/task-tracker/observer-sessions/, which triggers hooks
-  if (input.cwd && (input.cwd.includes('task-tracker') || input.cwd.includes('observer-sessions'))) {
+  // Guard: skip our own SDK sessions (prevents infinite loop)
+  // Compare against the exact observer cwd reported by worker, or fall back to config-derived path
+  const observerCwd = _observerCwd || join(homedir(), '.claude', 'task-tracker', 'observer-sessions');
+  if (input.cwd && input.cwd.startsWith(observerCwd)) {
     return null;
   }
 

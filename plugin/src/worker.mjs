@@ -377,7 +377,7 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
 
   if (url.pathname === '/health' && req.method === 'GET') {
-    res.end(JSON.stringify({ status: 'ok', pid: process.pid, uptime: process.uptime(), sdkLoaded: !!queryFn, version: WORKER_VERSION }));
+    res.end(JSON.stringify({ status: 'ok', pid: process.pid, uptime: process.uptime(), sdkLoaded: !!queryFn, version: WORKER_VERSION, observerCwd: join(DIR, 'observer-sessions') }));
     return;
   }
 
