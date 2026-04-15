@@ -167,8 +167,12 @@ select { width:100%; padding:4px 8px; border-radius:4px; border:1px solid var(--
         <div class="filter-pills" id="status-pills"></div>
       </div>
       <div class="filter-group">
-        <label>Project / Tag</label>
-        <select id="tag-filter"><option value="">All</option></select>
+        <label>Project</label>
+        <select id="project-filter"><option value="">All projects</option></select>
+      </div>
+      <div class="filter-group">
+        <label>Tag</label>
+        <select id="tag-filter"><option value="">All tags</option></select>
       </div>
       <div class="filter-group">
         <label>Priority</label>
@@ -198,7 +202,7 @@ select { width:100%; padding:4px 8px; border-radius:4px; border:1px solid var(--
 
 <script>
 const API = `http://${location.host}`;
-let allTasks = [], allLinks = [], activeStatuses = new Set(['open','in_progress','blocked']), activePriorities = new Set(), activeTag = '', searchQuery = '';
+let allTasks = [], allLinks = [], activeStatuses = new Set(['open','in_progress','blocked']), activePriorities = new Set(), activeTag = '', activeProject = '', searchQuery = '';
 const ORIGIN_LABELS = { user_initiated:'requested', user_confirmed:'confirmed', user_implicit:'implicit', agent_pending:'pending', agent_ignored:'ignored' };
 let currentConfig = {}, defaultConfig = {};
 
@@ -216,6 +220,7 @@ function renderAll() {
   renderStats();
   renderStatusPills();
   renderPriorityPills();
+  renderProjectFilter();
   renderTagFilter();
   renderTasks();
   renderActivity();
@@ -259,17 +264,26 @@ function renderPriorityPills() {
   });
 }
 
-function renderTagFilter() {
-  const tags = new Set();
-  for (const t of allTasks) for (const tag of (t.tags||[])) tags.add(tag);
+function renderProjectFilter() {
+  const projects = new Set();
   for (const l of allLinks) if (l.project) {
     const parts = l.project.split('/');
     const folder = parts[parts.length-1] || parts[parts.length-2];
-    if (folder) tags.add(folder);
+    if (folder) projects.add(folder);
   }
+  const sel = document.getElementById('project-filter');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">All projects</option>' + [...projects].sort().map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
+  sel.value = prev || '';
+  sel.onchange = () => { activeProject = sel.value; renderAll(); };
+}
+
+function renderTagFilter() {
+  const tags = new Set();
+  for (const t of allTasks) for (const tag of (t.tags||[])) tags.add(tag);
   const sel = document.getElementById('tag-filter');
   const prev = sel.value;
-  sel.innerHTML = '<option value="">All projects</option>' + [...tags].sort().map(t => `<option value="${t}">${t}</option>`).join('');
+  sel.innerHTML = '<option value="">All tags</option>' + [...tags].sort().map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
   sel.value = prev || '';
   sel.onchange = () => { activeTag = sel.value; renderAll(); };
 }
@@ -278,11 +292,11 @@ function filterTasks() {
   return allTasks.filter(t => {
     if (!activeStatuses.has(t.status)) return false;
     if (activePriorities.size && !activePriorities.has(t.priority)) return false;
-    if (activeTag && !(t.tags||[]).some(tag => tag.toLowerCase().includes(activeTag.toLowerCase()))) {
+    if (activeProject) {
       const linked = allLinks.filter(l => l.taskId === t.id);
-      const matchesProject = linked.some(l => l.project && l.project.toLowerCase().includes(activeTag.toLowerCase()));
-      if (!matchesProject) return false;
+      if (!linked.some(l => l.project && l.project.toLowerCase().includes(activeProject.toLowerCase()))) return false;
     }
+    if (activeTag && !(t.tags||[]).some(tag => tag.toLowerCase() === activeTag.toLowerCase())) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       return t.title.toLowerCase().includes(q) || (t.notes||'').toLowerCase().includes(q) || (t.tags||[]).some(tag => tag.toLowerCase().includes(q));
