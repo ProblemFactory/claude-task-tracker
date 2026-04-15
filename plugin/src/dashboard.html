@@ -63,6 +63,10 @@ select { width:100%; padding:4px 8px; border-radius:4px; border:1px solid var(--
 .tag:hover { background:rgba(88,166,255,.25); }
 .priority-high { color:var(--red); }
 .priority-low { color:var(--text-dim); opacity:.6; }
+.origin-agent { opacity:.65; border-style:dashed; }
+.origin-badge { font-size:9px; padding:1px 5px; border-radius:3px; }
+.origin-badge.agent { background:rgba(209,134,22,.15); color:var(--orange); }
+.origin-badge.user { background:rgba(63,185,80,.1); color:var(--green); }
 .task-id { font-size:11px; color:var(--text-dim); margin-top:4px; flex-shrink:0; }
 
 /* Expand area */
@@ -288,6 +292,8 @@ function getSubtasks(parentId) {
 function renderTaskCard(t) {
   const tags = (t.tags||[]).map(tag => `<span class="tag" onclick="event.stopPropagation();document.getElementById('tag-filter').value='${esc(tag)}';activeTag='${esc(tag)}';renderAll()">${esc(tag)}</span>`).join('');
   const prioClass = t.priority === 'high' ? 'priority-high' : t.priority === 'low' ? 'priority-low' : '';
+  const isAgent = t.origin === 'agent';
+  const originBadge = isAgent ? '<span class="origin-badge agent">agent</span>' : '';
   const date = (t.updatedAt||t.createdAt||'').slice(0,10);
   const notes = (t.notes||'').trim();
   const links = allLinks.filter(l => l.taskId === t.id);
@@ -311,7 +317,7 @@ function renderTaskCard(t) {
         <div class="task-status status-${s.status}"></div>
         <div class="subtask-body">
           <div class="subtask-title">${esc(s.title)}</div>
-          <div class="subtask-meta">#${s.id} &middot; ${sDate}${s.priority==='high'?' &middot; <span class="priority-high">high</span>':''}</div>
+          <div class="subtask-meta">#${s.id} &middot; ${sDate}${s.origin==='agent'?' &middot; <span class="origin-badge agent">agent</span>':''}${s.priority==='high'?' &middot; <span class="priority-high">high</span>':''}</div>
           ${sNotes ? `<div class="subtask-notes">${esc(sNotes)}</div>` : ''}
         </div>
       </div>`;
@@ -334,11 +340,12 @@ function renderTaskCard(t) {
   // Expand area: subtasks first, then notes
   const hasExpand = subtaskHtml || notesHtml;
 
-  return `<div class="task-card" onclick="this.classList.toggle('expanded')">
+  return `<div class="task-card${isAgent ? ' origin-agent' : ''}" onclick="this.classList.toggle('expanded')">
     <div class="task-status status-${t.status}"></div>
     <div class="task-body">
       <div class="task-title">${esc(t.title)} ${subLabel}</div>
       <div class="task-meta">
+        ${originBadge}
         ${tags}
         ${cwdInfo ? `<span style="opacity:.5">${esc(cwdInfo)}</span>` : ''}
         <span class="${prioClass}">${t.priority||'normal'}</span>

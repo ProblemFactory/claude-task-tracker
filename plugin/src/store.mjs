@@ -19,6 +19,7 @@ function getDb() {
   _db.exec('PRAGMA journal_mode=WAL');
   _db.exec('PRAGMA foreign_keys=ON');
   initSchema(_db);
+  migrateSchema(_db);
   migrateFromJson(_db);
   return _db;
 }
@@ -33,6 +34,7 @@ function initSchema(db) {
       notes TEXT DEFAULT '',
       tags TEXT DEFAULT '[]',
       parent_id INTEGER,
+      origin TEXT NOT NULL DEFAULT 'user',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       completed_at TEXT,
@@ -62,6 +64,14 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_links_task ON session_links(task_id);
     CREATE INDEX IF NOT EXISTS idx_links_session ON session_links(session_id);
   `);
+}
+
+function migrateSchema(db) {
+  // Add origin column if missing (upgrade from < 1.3.0)
+  const cols = db.prepare("PRAGMA table_info(tasks)").all();
+  if (!cols.some(c => c.name === 'origin')) {
+    db.exec("ALTER TABLE tasks ADD COLUMN origin TEXT NOT NULL DEFAULT 'user'");
+  }
 }
 
 function migrateFromJson(db) {
@@ -136,13 +146,13 @@ export function getSubtasks(parentId) {
   return db.prepare('SELECT * FROM tasks WHERE parent_id = ?').all(parentId).map(rowToTask);
 }
 
-export function createTask({ title, status, priority, notes, tags, parentId }) {
+export function createTask({ title, status, priority, notes, tags, parentId, origin }) {
   const db = getDb();
   const now = new Date().toISOString();
   const result = db.prepare(`
-    INSERT INTO tasks (title, status, priority, notes, tags, parent_id, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(title, status || 'open', priority || 'normal', notes || '', JSON.stringify(tags || []), parentId || null, now, now);
+    INSERT INTO tasks (title, status, priority, notes, tags, parent_id, origin, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(title, status || 'open', priority || 'normal', notes || '', JSON.stringify(tags || []), parentId || null, origin || 'user', now, now);
   return Number(result.lastInsertRowid);
 }
 
@@ -243,6 +253,7 @@ function rowToTask(row) {
     notes: row.notes,
     tags: JSON.parse(row.tags || '[]'),
     parentId: row.parent_id,
+    origin: row.origin || 'user',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,

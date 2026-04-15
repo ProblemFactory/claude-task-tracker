@@ -132,6 +132,9 @@ Large tasks should be broken into subtasks. Use parent_id to link subtasks to pa
 
 Status: open | in_progress | done | blocked
 Priority: low | normal | high
+Origin: user | agent
+- "user" = user explicitly requested, initiated, or agreed to this work
+- "agent" = Claude proposed/started this without explicit user request or confirmation
 
 ## Current Open Tasks
 ${taskList}
@@ -142,7 +145,7 @@ ${taskList}
 ${summary.slice(0, cfg.maxPromptChars)}
 
 Respond with ONLY JSON:
-{"updates":[{"task_id":N,"status":"...","notes":"brief"}],"new_tasks":[{"title":"...","status":"in_progress","priority":"normal","tags":["project"],"notes":"brief","parent_id":null}],"session_summary":"one line"}
+{"updates":[{"task_id":N,"status":"...","notes":"brief","origin":"user"}],"new_tasks":[{"title":"...","status":"in_progress","priority":"normal","tags":["project"],"notes":"brief","parent_id":null,"origin":"user"}],"session_summary":"one line"}
 
 parent_id: set to an existing task ID to create a subtask, or null for a top-level task.
 ${cfg.language && cfg.language !== 'auto' ? `\nIMPORTANT: Write ALL task titles, notes, and session_summary in ${cfg.language}.` : '\nIMPORTANT: Write task titles, notes, and session_summary in the SAME language the user uses in the conversation. If the user writes in Chinese, respond in Chinese. If in English, respond in English. Match their language.'}`;
@@ -231,6 +234,8 @@ function applyResult(result, sessionId, cwd) {
     if (u.status) updates.status = u.status;
     if (u.notes) updates.notes = (task.notes ? task.notes + '\n' : '') + `[${today}] ${u.notes}`;
     if (u.status === 'done') updates.completedAt = now;
+    // Upgrade origin: if user now engages with an agent-proposed task, it becomes user-confirmed
+    if (task.origin === 'agent' && u.origin === 'user') updates.origin = 'user';
     updateTask(task.id, updates);
     addSessionLink({ taskId: task.id, sessionId, project: cwd, role: u.status === 'done' ? 'completed' : 'progressed', summary: u.notes });
   }
@@ -244,9 +249,10 @@ function applyResult(result, sessionId, cwd) {
       const parent = getTaskById(parentId);
       if (parent?.tags?.length) tags = [...parent.tags];
     }
+    const origin = (n.origin === 'agent') ? 'agent' : 'user';
     const id = createTask({
       title: n.title, status: n.status || 'open', priority: n.priority || 'normal',
-      notes: n.notes ? `[${today}] ${n.notes}` : '', tags, parentId,
+      notes: n.notes ? `[${today}] ${n.notes}` : '', tags, parentId, origin,
     });
     addSessionLink({ taskId: id, sessionId, project: cwd, role: 'created', summary: n.notes });
   }
