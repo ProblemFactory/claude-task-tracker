@@ -1,0 +1,17 @@
+{
+  "name": "claude-task-tracker",
+  "version": "1.0.0",
+  "description": "Passive task tracking for Claude Code — observes conversations via hooks and maintains a global task database with web dashboard",
+  "author": {
+    "name": "ProblemFactory"
+  },
+  "repository": "https://github.com/ProblemFactory/claude-task-tracker",
+  "license": "MIT",
+  "keywords": [
+    "task-tracker",
+    "hooks",
+    "productivity",
+    "dashboard",
+    "passive-tracking"
+  ]
+}

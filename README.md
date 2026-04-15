@@ -30,51 +30,38 @@ Tasks are **global** — not tied to a specific folder or session. The AI recogn
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed
 - The `@anthropic-ai/claude-agent-sdk` must be available (automatically found if any globally-installed package depends on it)
 
-### Install
+### Install via Claude Code plugins (recommended)
 
 ```bash
-# Clone the repo
-git clone https://github.com/ProblemFactory/claude-task-tracker.git
-cd claude-task-tracker
+# Add the marketplace
+claude plugins marketplace add github:ProblemFactory/claude-task-tracker
 
-# Install hooks into Claude Code
-node bin/cli.mjs install
+# Install the plugin
+claude plugins install claude-task-tracker@ProblemFactory
 ```
 
-That's it. The worker starts automatically on your next Claude Code session.
+That's it. Hooks are registered automatically. The worker starts on your next Claude Code session.
 
 ### Verify
 
 ```bash
-node bin/cli.mjs status
+claude plugins list
 ```
 
 ### Uninstall
 
 ```bash
-node bin/cli.mjs uninstall
-node bin/cli.mjs stop
+claude plugins uninstall claude-task-tracker@ProblemFactory
+claude plugins marketplace remove ProblemFactory
 ```
 
 ## Usage
 
 Once installed, the tracker runs silently in the background. Open the dashboard to see your tasks:
 
-```bash
-node bin/cli.mjs dashboard
-# or visit http://localhost:37778
 ```
-
-### CLI Commands
-
-| Command | Description |
-|---------|-------------|
-| `install` | Install hooks into `~/.claude/settings.json` |
-| `uninstall` | Remove hooks |
-| `status` | Show worker status, hook status, task counts |
-| `start` | Start the worker manually |
-| `stop` | Stop the worker |
-| `dashboard` | Open the dashboard in your browser |
+http://localhost:37778
+```
 
 ### Dashboard Features
 
@@ -82,7 +69,7 @@ node bin/cli.mjs dashboard
 - Filter by status, priority, project/tag
 - Full-text search across task titles and notes
 - Activity stream showing recent task changes
-- Settings panel for configuring the tracker
+- Settings panel (gear icon) for configuring the tracker
 
 ## Configuration
 
@@ -132,13 +119,25 @@ TASK_TRACKER_HOST=127.0.0.1
 ## Architecture
 
 ```
-~/.claude/task-tracker/
-├── config.json         # User configuration
-├── data.json           # Task database
-├── TASKS.md            # Auto-generated markdown view
-├── worker.pid          # PID file for worker lifecycle
-├── debug.log           # Debug log
-└── observer-sessions/  # Temp dir for SDK sessions (auto-cleaned)
+~/.claude/task-tracker/          # Runtime data (auto-created)
+├── config.json                  # User configuration
+├── data.json                    # Task database
+├── TASKS.md                     # Auto-generated markdown view
+├── worker.pid                   # PID file for worker lifecycle
+├── debug.log                    # Debug log
+└── observer-sessions/           # Temp dir for SDK sessions (auto-cleaned)
+
+plugin/                          # Plugin source (installed by Claude Code)
+├── .claude-plugin/plugin.json   # Plugin metadata
+├── hooks/hooks.json             # Hook definitions
+├── src/
+│   ├── worker.mjs               # Background worker + HTTP server
+│   ├── hook.mjs                 # Hook handler (stdin → worker POST)
+│   ├── config.mjs               # Configuration management
+│   ├── store.mjs                # JSON persistence + TASKS.md renderer
+│   ├── ai.mjs                   # Transcript parsing + summarization
+│   └── dashboard.html           # Web dashboard
+└── bin/cli.mjs                  # CLI for manual management
 ```
 
 ### Data model

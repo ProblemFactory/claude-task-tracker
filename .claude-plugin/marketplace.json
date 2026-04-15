@@ -1,0 +1,18 @@
+{
+  "name": "ProblemFactory",
+  "owner": {
+    "name": "ProblemFactory"
+  },
+  "metadata": {
+    "description": "Plugins by ProblemFactory",
+    "homepage": "https://github.com/ProblemFactory/claude-task-tracker"
+  },
+  "plugins": [
+    {
+      "name": "claude-task-tracker",
+      "version": "1.0.0",
+      "source": "./plugin",
+      "description": "Passive task tracking for Claude Code — observes conversations via hooks and maintains a global task database with web dashboard"
+    }
+  ]
+}
