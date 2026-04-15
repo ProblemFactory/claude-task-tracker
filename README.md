@@ -22,11 +22,35 @@ Worker (persistent background process)
 
 Tasks are **global** — not tied to a specific folder or session. The AI recognizes when different sessions work on the same feature and links them together.
 
+### Example: what gets tracked
+
+Suppose you work across several Claude Code sessions on different projects. The tracker observes your conversations and automatically builds a task list like this:
+
+```
+# Active Tasks
+
+- #2 Add user authentication to web app (in_progress) [backend, auth]
+    - #5  Set up OAuth2 provider integration (done)
+    - #6  Build login/signup UI components (in_progress)
+    - #7  Add session management middleware (open)
+    - #8  Write auth integration tests (open)
+- #3 Migrate database from Postgres to SQLite (open) [backend, db]
+- #4 Fix responsive layout on mobile dashboard (in_progress) [frontend]
+    - #9  Debug sidebar collapse on small screens (done)
+    - #10 Fix chart overflow in analytics view (in_progress)
+```
+
+Notice:
+- **Automatic subtask creation** — large tasks like "Add user authentication" get broken into trackable subtasks
+- **Cross-session linking** — work done in `/projects/backend/` and `/projects/frontend/` both update related tasks
+- **Status inference** — tasks move from `open` → `in_progress` → `done` based on conversation evidence
+- **No manual input** — you never tell the tracker anything; it observes your Claude Code transcripts
+
 ## Installation
 
 ### Prerequisites
 
-- Node.js >= 18
+- Node.js >= 22 (uses built-in `node:sqlite`)
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed
 - The `@anthropic-ai/claude-agent-sdk` must be available (automatically found if any globally-installed package depends on it)
 
@@ -121,7 +145,7 @@ TASK_TRACKER_HOST=127.0.0.1
 ```
 ~/.claude/task-tracker/          # Runtime data (auto-created)
 ├── config.json                  # User configuration
-├── data.json                    # Task database
+├── tasks.db                     # SQLite database (WAL mode)
 ├── TASKS.md                     # Auto-generated markdown view
 ├── worker.pid                   # PID file for worker lifecycle
 ├── debug.log                    # Debug log
@@ -134,15 +158,19 @@ plugin/                          # Plugin source (installed by Claude Code)
 │   ├── worker.mjs               # Background worker + HTTP server
 │   ├── hook.mjs                 # Hook handler (stdin → worker POST)
 │   ├── config.mjs               # Configuration management
-│   ├── store.mjs                # JSON persistence + TASKS.md renderer
+│   ├── store.mjs                # SQLite persistence + TASKS.md renderer
 │   ├── ai.mjs                   # Transcript parsing + summarization
 │   └── dashboard.html           # Web dashboard
 └── bin/cli.mjs                  # CLI for manual management
 ```
 
+### Storage
+
+Uses **SQLite** via Node.js built-in `node:sqlite` (Node >= 22). WAL mode for concurrent reads. Indexes on `tasks.status`, `tasks.parent_id`, `session_links.task_id`. Auto-migrates from legacy `data.json` on first run.
+
 ### Data model
 
-- **Tasks**: `{ id, title, status, priority, notes, tags, createdAt, updatedAt, completedAt }`
+- **Tasks**: `{ id, title, status, priority, notes, tags[], parentId, createdAt, updatedAt, completedAt }`
 - **Session Links**: Track which sessions created/progressed/completed which tasks
 - **Analysis State**: Per-session byte offset for incremental transcript reading
 
