@@ -134,8 +134,8 @@ async function main(input) {
   const event = input.hook_event_name;
 
   // Guard: skip if this session is from our own SDK analysis (prevents infinite loop)
-  // SDK query() runs with cwd=observer-sessions, which triggers hooks on that session
-  if (input.cwd && input.cwd.includes('observer-sessions')) {
+  // SDK query() runs with cwd=~/.claude/task-tracker/observer-sessions/, which triggers hooks
+  if (input.cwd && (input.cwd.includes('task-tracker') || input.cwd.includes('observer-sessions'))) {
     return null;
   }
 
