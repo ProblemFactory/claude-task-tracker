@@ -138,7 +138,7 @@ Respond with ONLY JSON:
 {"updates":[{"task_id":N,"status":"...","notes":"brief"}],"new_tasks":[{"title":"...","status":"in_progress","priority":"normal","tags":["project"],"notes":"brief","parent_id":null}],"session_summary":"one line"}
 
 parent_id: set to an existing task ID to create a subtask, or null for a top-level task.
-${cfg.language && cfg.language !== 'auto' ? `\nIMPORTANT: Write ALL task titles, notes, and session_summary in ${cfg.language}.` : ''}`;
+${cfg.language && cfg.language !== 'auto' ? `\nIMPORTANT: Write ALL task titles, notes, and session_summary in ${cfg.language}.` : '\nIMPORTANT: Write task titles, notes, and session_summary in the SAME language the user uses in the conversation. If the user writes in Chinese, respond in Chinese. If in English, respond in English. Match their language.'}`;
 
   if (!queryFn) { log('No SDK available, skipping analysis'); return; }
 
