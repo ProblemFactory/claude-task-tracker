@@ -64,13 +64,15 @@ select { width:100%; padding:4px 8px; border-radius:4px; border:1px solid var(--
 .priority-high { color:var(--red); }
 .priority-low { color:var(--text-dim); opacity:.6; }
 .origin-agent { opacity:.6; border-style:dashed; }
-.origin-badge { font-size:9px; padding:1px 5px; border-radius:3px; cursor:default; }
-.origin-badge[title] { cursor:help; }
+.origin-badge { font-size:9px; padding:1px 5px; border-radius:3px; cursor:pointer; position:relative; }
 .origin-badge.user_initiated { background:rgba(63,185,80,.12); color:var(--green); }
 .origin-badge.user_confirmed { background:rgba(63,185,80,.08); color:var(--green); opacity:.8; }
 .origin-badge.user_implicit { background:rgba(88,166,255,.1); color:var(--accent); }
 .origin-badge.agent_pending { background:rgba(209,134,22,.15); color:var(--orange); }
 .origin-badge.agent_ignored { background:rgba(139,148,158,.12); color:var(--text-dim); }
+.origin-popover { display:none; position:absolute; z-index:50; top:100%; left:0; margin-top:4px; background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:8px 10px; min-width:280px; max-width:520px; box-shadow:0 4px 12px rgba(0,0,0,.4); font-size:11px; line-height:1.5; color:var(--text); white-space:pre-wrap; word-wrap:break-word; text-align:left; }
+.origin-popover.open { display:block; }
+.origin-popover .pop-title { font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
 .task-category { font-size:9px; padding:1px 5px; border-radius:3px; background:rgba(188,140,255,.1); color:var(--purple); }
 .task-id { font-size:11px; color:var(--text-dim); margin-top:4px; flex-shrink:0; }
 
@@ -403,7 +405,7 @@ function renderSubtaskList(parentId) {
       <div class="task-status status-${s.status}"></div>
       <div class="subtask-body">
         <div class="subtask-title">${esc(s.title)}${grandLabel}</div>
-        <div class="subtask-meta">#${s.id} &middot; ${sDate}${ORIGIN_LABELS[s.origin]?' &middot; <span class="origin-badge '+(s.origin)+'" title="'+(esc(s.originReason||''))+'">'+(ORIGIN_LABELS[s.origin])+'</span>':''}${s.category?' &middot; <span class="task-category">'+esc(s.category)+'</span>':''}${s.priority==='high'?' &middot; <span class="priority-high">high</span>':''}</div>
+        <div class="subtask-meta">#${s.id} &middot; ${sDate}${ORIGIN_LABELS[s.origin]?' &middot; '+makeOriginBadge(s.origin, ORIGIN_LABELS[s.origin], s.originReason):''}${s.category?' &middot; <span class="task-category">'+esc(s.category)+'</span>':''}${s.priority==='high'?' &middot; <span class="priority-high">high</span>':''}</div>
         ${s.context ? `<div style="font-size:10px;color:var(--text-dim);margin-top:2px">${esc(s.context)}</div>` : ''}
         ${sNotes ? `<div class="subtask-notes">${esc(sNotes)}</div>` : ''}
         ${renderSubtaskList(s.id)}
@@ -419,7 +421,7 @@ function renderTaskCard(t) {
   const prioClass = t.priority === 'high' ? 'priority-high' : t.priority === 'low' ? 'priority-low' : '';
   const isAgent = (t.origin||'').startsWith('agent');
   const originLabel = ORIGIN_LABELS[t.origin] || t.origin || '';
-  const originBadge = originLabel ? `<span class="origin-badge ${esc(t.origin)}" title="${esc(t.originReason||'')}">${originLabel}</span>` : '';
+  const originBadge = originLabel ? makeOriginBadge(t.origin, originLabel, t.originReason) : '';
   const categoryBadge = t.category ? `<span class="task-category">${esc(t.category)}</span>` : '';
   const date = (t.updatedAt||t.createdAt||'').slice(0,10);
   const notes = (t.notes||'').trim();
@@ -553,6 +555,31 @@ function renderActivity() {
 }
 
 function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+function makeOriginBadge(origin, label, reason) {
+  const reasonText = (reason || '').trim();
+  const hasHistory = reasonText.includes('\u2192');
+  const popTitle = hasHistory ? 'Origin history' : 'Origin reason';
+  const popBody = reasonText || '(no reason recorded)';
+  return `<span class="origin-badge ${esc(origin)}" onclick="event.stopPropagation();toggleOriginPopover(this)">
+    ${label}
+    <span class="origin-popover"><div class="pop-title">${popTitle}</div>${esc(popBody)}</span>
+  </span>`;
+}
+
+function toggleOriginPopover(badge) {
+  const pop = badge.querySelector('.origin-popover');
+  const isOpen = pop.classList.contains('open');
+  document.querySelectorAll('.origin-popover.open').forEach(p => p.classList.remove('open'));
+  if (!isOpen) pop.classList.add('open');
+}
+
+// Close popovers when clicking elsewhere
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.origin-badge')) {
+    document.querySelectorAll('.origin-popover.open').forEach(p => p.classList.remove('open'));
+  }
+});
 
 // ── Settings ──
 
