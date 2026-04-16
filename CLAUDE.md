@@ -12,8 +12,11 @@ plugin/                          # Plugin source (Claude Code installs from here
 │   ├── worker.mjs               # Persistent HTTP server (port from config, default 37778)
 │   ├── hook.mjs                 # Thin hook handler: reads stdin JSON, POSTs to worker
 │   ├── config.mjs               # Config: file (~/.claude/task-tracker/config.json) + env vars
-│   ├── store.mjs                # SQLite via node:sqlite (DatabaseSync, WAL mode)
+│   ├── store.mjs                # SQLite via node:sqlite (DatabaseSync, WAL mode) + chroma sync hooks
 │   ├── ai.mjs                   # Transcript JSONL reader + message summarizer
+│   ├── chroma.mjs               # Minimal MCP stdio client for chroma-mcp subprocess (embeddings)
+│   ├── search.mjs               # BM25 ranker (fallback when chroma unavailable)
+│   ├── tools.mjs                # In-process MCP tools (search/get/tree/list) exposed to AI
 │   └── dashboard.html           # Single-page dark-theme dashboard with settings modal
 ├── bin/cli.mjs                  # CLI: status/start/stop/dashboard
 └── package.json
@@ -24,6 +27,7 @@ plugin/                          # Plugin source (Claude Code installs from here
 
 All at `~/.claude/task-tracker/`:
 - `tasks.db` — SQLite database (tasks, session_links, analysis_state tables)
+- `chroma/` — Local vector DB managed by `uvx chroma-mcp` subprocess
 - `config.json` — User config overrides
 - `TASKS.md` — Auto-generated markdown view
 - `worker.pid` — PID file for lifecycle management
@@ -48,6 +52,12 @@ All at `~/.claude/task-tracker/`:
 - **Reparenting** — AI can move existing tasks under a new parent when it discovers they're part of a larger goal. Uses `parent_id: "NEW:Parent Title"` in updates, resolved after new tasks are created.
 - **Dashboard filters** — Six independent filters: Project (from session cwd), Status, Tag (from task.tags), Priority, Origin, Category. All AND-combined. Status pill counts reflect other active filters. Project filter propagates through task family (parent matches if any descendant matches).
 - **Expand state preserved across refresh** — Dashboard auto-refreshes every 15s, but task card expansions, subtask expansions, and notes toggles are preserved using `data-task-id` attributes.
+- **Semantic retrieval pipeline** (v1.8.x) — Analysis prompt no longer dumps all open tasks. Pipeline:
+  1. **HyDE** — conversation summary goes through Haiku which extracts 3-5 task-themed noun phrases
+  2. **Chroma query** — phrases embedded by chromadb's default `all-MiniLM-L6-v2` (via `uvx chroma-mcp` Python subprocess, fully local, no API)
+  3. **Candidate merge** — top-K semantic hits ∪ project-local tasks ∪ active in-progress top-level tasks ∪ family tree expansion
+  4. **AI tools (optional)** — in-process MCP server exposes `search_tasks` / `get_task` / `get_task_tree` / `list_tasks` so Sonnet can dig deeper when candidate list is insufficient
+  Fallback: if `uvx` is missing, BM25 ranker (`search.mjs`) is available but worker currently keeps candidate set without chroma; tools still expose hybrid search. Auto-backfill existing tasks on worker startup. `createTask`/`updateTask` fire-and-forget re-index when indexed fields change.
 
 ## Development Notes
 
@@ -60,6 +70,9 @@ All at `~/.claude/task-tracker/`:
 - `language` config: 'auto' (match user's language) or explicit (e.g. 'Chinese')
 - Version bump required for every release: both `plugin/.claude-plugin/plugin.json` AND `.claude-plugin/marketplace.json`
 - Schema migrations in `migrateSchema()` run on every startup, adding new columns with defaults for existing DBs
+- **Optional deps**: `uvx` (from `uv`) enables chroma-mcp for embeddings. `zod` (sibling to SDK in node_modules) enables MCP tools. Both degrade gracefully if missing.
+- When `mcpServers` is passed to SDK `query()`, `maxTurns` auto-bumps to ≥5 so AI has room to iterate on tool calls
+- HyDE uses `haiku` model (hardcoded), analysis uses `cfg.model` (default `sonnet`). Haiku is cheap enough that every analysis runs HyDE.
 
 ## Distribution
 
