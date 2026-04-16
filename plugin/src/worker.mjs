@@ -124,8 +124,11 @@ Match work to existing tasks by SEMANTIC similarity. "task" = meaningful work un
 Don't create tasks for greetings, clarifications, routine git ops.
 Only update status with CLEAR evidence.
 
-## Stale task review
-ALSO review the existing open tasks below. If the conversation provides evidence that a task is ALREADY DONE (e.g. the feature was completed in a previous session, the bug was fixed, the user mentions it's finished), mark it done in updates. Don't leave tasks in open/in_progress if the conversation clearly shows the work is complete.
+## Stale task review + organization review
+Each analysis, also review the existing tasks:
+- Mark tasks DONE if the conversation shows the work is complete (previous session evidence OK).
+- Look for REPARENTING opportunities: if two or more top-level tasks are actually parts of the same larger effort, create or identify a parent and move them under it via the reparenting mechanism.
+- Check if a parent task was incorrectly marked done: if it represents ongoing work but was auto-completed, reopen it.
 
 ## Task fields
 - title: 5-15 words, specific and descriptive
@@ -147,7 +150,9 @@ ALSO review the existing open tasks below. If the conversation provides evidence
 Break large tasks into subtasks aggressively. Use parent_id to link.
 - If conversation reveals sub-work of an existing task, create subtasks under it.
 - Parent status reflects overall progress; subtasks track individual pieces.
-- Nest as deep as needed (no hard limit, but prefer flat when it makes sense). When ALL subtasks done → mark parent done.
+- Nest as deep as needed (no hard limit, but prefer flat when it makes sense).
+- Auto-complete parent rule: ONLY mark a parent done when ALL subtasks are done AND the parent represents a BOUNDED deliverable (e.g. "Fix dropdown bug", "Release v2.1.0"). Do NOT auto-complete parents that represent ONGOING projects or long-term containers (e.g. "Build X system", "Support Y customer"). When in doubt, leave parent in_progress.
+- When reviewing existing tasks: if a seemingly-done root task represents ongoing work (indicated by tags like "platform", broad scope, or category not being a specific deliverable), reopen it back to in_progress.
 - REPARENTING: If you discover an existing top-level task is actually part of a bigger goal:
   1. Create the new parent task (in new_tasks with parent_id: null)
   2. In updates, set parent_id on the existing task(s) to the new parent's ID placeholder "NEW:title"
@@ -340,25 +345,6 @@ function applyResult(result, sessionId, cwd) {
     addSessionLink({ taskId: task.id, sessionId, project: cwd, role: u.status === 'done' ? 'completed' : 'progressed', summary: u.notes });
   }
 
-  // Auto-complete parents when all subtasks are done
-  for (const u of result.updates || []) {
-    if (u.status === 'done') {
-      const task = getTaskById(u.task_id);
-      if (task?.parentId) {
-        const siblings = getSubtasks(task.parentId);
-        if (siblings.length && siblings.every(t => t.status === 'done')) {
-          const parent = getTaskById(task.parentId);
-          if (parent && parent.status !== 'done') {
-            updateTask(parent.id, {
-              status: 'done', completedAt: now,
-              notes: (parent.notes ? parent.notes + '\n' : '') + `[${today}] All subtasks completed`,
-            });
-            addSessionLink({ taskId: parent.id, sessionId, project: cwd, role: 'completed', summary: 'All subtasks completed' });
-          }
-        }
-      }
-    }
-  }
 }
 
 // ── HTTP Server ──
