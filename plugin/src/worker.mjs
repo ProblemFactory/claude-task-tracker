@@ -165,7 +165,7 @@ Each task and update MUST have an origin + origin_reason:
 
 origin_reason: One sentence explaining your classification with specific evidence from the conversation.
 
-For UPDATES to existing tasks: if a task was "agent_pending" and user now engages with it → upgrade to "user_confirmed" or "user_implicit". If user's subsequent messages ignore it → downgrade to "agent_ignored".
+For UPDATES to existing tasks: only include origin/origin_reason if the origin actually CHANGES (e.g. agent_pending → user_confirmed because user just engaged). If origin stays the same, OMIT both fields — origin_reason captures WHY the task was originally classified, it must NOT be overwritten with reasons for unrelated later updates.
 
 ## Correcting outdated task metadata
 If the conversation reveals that a task's title, tags, category, or priority is now WRONG or OUTDATED (e.g. customer name was wrong, scope changed, project misidentified), include corrected fields in the update. Don't leave stale metadata. Examples:
@@ -327,10 +327,10 @@ function applyResult(result, sessionId, cwd) {
     if (u.context_append) {
       updates.context = (task.context ? task.context + ' ' : '') + u.context_append;
     }
-    // Origin transitions
-    if (u.origin && VALID_ORIGINS.includes(u.origin)) {
-      const cur = task.origin;
-      if (cur !== 'user_initiated') updates.origin = u.origin;
+    // Origin transitions: only update reason when origin actually changes
+    // origin_reason should preserve the ORIGINAL evidence for why this task was created/classified
+    if (u.origin && VALID_ORIGINS.includes(u.origin) && task.origin !== 'user_initiated' && u.origin !== task.origin) {
+      updates.origin = u.origin;
       if (u.origin_reason) updates.origin_reason = u.origin_reason;
     }
     updateTask(task.id, updates);
