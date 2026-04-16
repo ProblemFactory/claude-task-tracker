@@ -138,7 +138,8 @@ ALSO review the existing open tasks below. If the conversation provides evidence
   * ACCEPTANCE CRITERIA — how to know when it's done, if mentioned
   * DECISIONS MADE — architectural choices, trade-offs discussed
   Write 2-5 sentences. This field is used to match future conversations to existing tasks, so include distinctive keywords and specifics.
-- notes: Factual timestamped log. For UPDATES, append what changed this session. Be specific: mention file names, function names, error messages, commands run, decisions made. Each entry should be self-contained enough to understand without reading previous entries.
+- notes: Factual log entry. For UPDATES, describe what changed this session. Be specific: mention file names, function names, error messages, commands run, decisions made. Each entry should be self-contained.
+  DO NOT prepend dates yourself (e.g. don't write "[2025-01-23] foo" or "[2026-04-15] bar"). The system automatically adds the current date. Just write the log content directly.
 
 ## Subtasks & Reparenting
 Break large tasks into subtasks aggressively. Use parent_id to link.
