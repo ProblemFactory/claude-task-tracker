@@ -147,7 +147,7 @@ ALSO review the existing open tasks below. If the conversation provides evidence
 Break large tasks into subtasks aggressively. Use parent_id to link.
 - If conversation reveals sub-work of an existing task, create subtasks under it.
 - Parent status reflects overall progress; subtasks track individual pieces.
-- Max 2 levels deep. When ALL subtasks done → mark parent done.
+- Nest as deep as needed (no hard limit, but prefer flat when it makes sense). When ALL subtasks done → mark parent done.
 - REPARENTING: If you discover an existing top-level task is actually part of a bigger goal:
   1. Create the new parent task (in new_tasks with parent_id: null)
   2. In updates, set parent_id on the existing task(s) to the new parent's ID placeholder "NEW:title"
