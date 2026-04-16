@@ -591,6 +591,20 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Static assets (icons preview, svg files)
+  if (req.method === 'GET' && url.pathname.startsWith('/assets/')) {
+    const srcDir = new URL('.', import.meta.url).pathname;
+    const safePath = url.pathname.replace(/\.\./g, '');
+    const full = join(srcDir, safePath);
+    try {
+      const ext = safePath.split('.').pop();
+      const mime = ext === 'svg' ? 'image/svg+xml' : ext === 'html' ? 'text/html' : 'text/plain';
+      res.setHeader('Content-Type', mime);
+      res.end(readFileSync(full));
+    } catch { res.statusCode = 404; res.end('not found'); }
+    return;
+  }
+
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Access-Control-Allow-Origin', '*');
 
