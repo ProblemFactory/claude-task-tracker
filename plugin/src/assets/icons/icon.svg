@@ -1,32 +1,42 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
   <style>
-    .frame { stroke: #d0d7de; fill: none; }
-    .line { stroke: #d0d7de; }
+    /* Light theme (default): use darker, saturated versions */
+    .bar-blue { fill: #1f6feb; }
+    .bar-yellow { fill: #9a6700; }
+    .bar-green { fill: #1f883d; }
+    .dot-blue { fill: #1f6feb; }
+    .dot-yellow { fill: #9a6700; }
+    .dot-green { fill: #1f883d; }
+    .line { stroke: #57606a; }
     .check { stroke: #ffffff; }
+    .grad-stop-a { stop-color: #1f6feb; }
+    .grad-stop-b { stop-color: #1f883d; }
     @media (prefers-color-scheme: dark) {
-      .frame { stroke: #30363d; }
-      .line { stroke: #30363d; }
+      .bar-blue { fill: #58a6ff; }
+      .bar-yellow { fill: #d29922; }
+      .bar-green { fill: #3fb950; }
+      .dot-blue { fill: #58a6ff; }
+      .dot-yellow { fill: #d29922; }
+      .dot-green { fill: #3fb950; }
+      .line { stroke: #8b949e; }
       .check { stroke: #0d1117; }
+      .grad-stop-a { stop-color: #58a6ff; }
+      .grad-stop-b { stop-color: #3fb950; }
     }
   </style>
   <defs>
-    <linearGradient id="tt-g" x1="0" x2="1" y1="0" y2="1">
-      <stop offset="0" stop-color="#58a6ff"/>
-      <stop offset="1" stop-color="#3fb950"/>
+    <linearGradient id="v5bg" x1="0" x2="1" y1="0" y2="1">
+      <stop class="grad-stop-a" offset="0"/>
+      <stop class="grad-stop-b" offset="1"/>
     </linearGradient>
   </defs>
-  <rect class="frame" x="4" y="4" width="56" height="56" rx="13" stroke-width="1.5"/>
-  <!-- Parent row -->
-  <circle cx="16" cy="20" r="4" fill="url(#tt-g)"/>
-  <path class="check" d="M14 20 l1.5 1.5 l3 -3.2" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <rect x="24" y="17.5" width="28" height="5" rx="2.5" fill="#58a6ff" opacity="0.85"/>
-  <!-- Connectors -->
-  <path class="line" d="M20 26 V 46 M20 34 h 4 M20 46 h 4" stroke-width="1.3" fill="none"/>
-  <!-- Subtask 1 (in-progress) -->
-  <circle cx="28" cy="34" r="3.2" fill="#d29922"/>
-  <rect x="34" y="31.8" width="18" height="4.4" rx="2.2" fill="#d29922" opacity="0.6"/>
-  <!-- Subtask 2 (done) -->
-  <circle cx="28" cy="46" r="3.2" fill="#3fb950"/>
-  <path class="check" d="M26 46 l1.2 1.2 l2.5 -2.5" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <rect x="34" y="43.8" width="14" height="4.4" rx="2.2" fill="#3fb950" opacity="0.55"/>
+  <circle cx="14" cy="18" r="5" fill="url(#v5bg)"/>
+  <path class="check" d="M11.5 18 l2 2 l3.8 -4" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <rect class="bar-blue" x="24" y="14.5" width="34" height="7" rx="3.5"/>
+  <path class="line" d="M18 26 V 50 M18 38 h 6 M18 50 h 6" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <circle class="dot-yellow" cx="30" cy="38" r="4.5"/>
+  <rect class="bar-yellow" x="38" y="34.5" width="22" height="7" rx="3.5"/>
+  <circle class="dot-green" cx="30" cy="50" r="4.5"/>
+  <path class="check" d="M27.5 50 l1.8 1.8 l3.5 -3.8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <rect class="bar-green" x="38" y="46.5" width="16" height="7" rx="3.5"/>
 </svg>
