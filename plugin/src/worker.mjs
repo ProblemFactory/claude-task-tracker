@@ -117,6 +117,8 @@ async function runAnalysis(job) {
 
   const prompt = `You are a task tracker analyzing development conversations. Be thorough — extract as much structured information as possible.
 
+Current date and time: ${new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC
+
 GLOBAL task list — tasks are NOT tied to folders. Same feature may span sessions.
 Match work to existing tasks by SEMANTIC similarity. "task" = meaningful work unit.
 Don't create tasks for greetings, clarifications, routine git ops.
@@ -266,7 +268,7 @@ function parseJSON(raw) {
 
 function applyResult(result, sessionId, cwd) {
   const now = new Date().toISOString();
-  const today = now.slice(0, 10);
+  const today = now.slice(0, 16).replace('T', ' ');
 
   const VALID_ORIGINS = ['user_initiated', 'user_confirmed', 'user_implicit', 'agent_pending', 'agent_ignored'];
 
