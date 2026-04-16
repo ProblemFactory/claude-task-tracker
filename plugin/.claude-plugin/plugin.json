@@ -1,6 +1,6 @@
 {
   "name": "claude-task-tracker",
-  "version": "1.6.2",
+  "version": "1.6.3",
   "description": "Passive task tracking for Claude Code — observes conversations via hooks and maintains a global task database with web dashboard",
   "author": {
     "name": "ProblemFactory"
