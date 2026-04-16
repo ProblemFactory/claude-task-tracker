@@ -130,6 +130,20 @@ Each analysis, also review the existing tasks:
 - Look for REPARENTING opportunities: if two or more top-level tasks are actually parts of the same larger effort, create or identify a parent and move them under it via the reparenting mechanism.
 - Check if a parent task was incorrectly marked done: if it represents ongoing work but was auto-completed, reopen it.
 
+## Before creating a new top-level task — check for natural parents
+Creating too many top-level tasks makes the dashboard cluttered. Before setting parent_id: null on a new task, scan the existing list for:
+- **Same project/product parent**: e.g. "Build Claude Code WebUI" owns all UI bug fixes / features for that webui
+- **Same customer/client parent**: e.g. "Ello customer support" owns all technical questions from that customer
+- **Same topic/domain parent**: e.g. "Personal health research" owns all blood-test/wearable-device research
+- **Same plugin/dependency parent**: e.g. "claude-mem maintenance" owns all upgrade/patch/config tasks for that plugin
+If a natural parent exists (even vaguely), put the new task under it. Only use parent_id: null for tasks that are genuinely standalone.
+
+## Parent task naming
+When creating a parent container, pick a title that reflects its ONGOING scope, not a single milestone. Good: "Build X system", "Support Y customer", "Research Z topic". Bad: "Implement feature A" (too narrow — future work for X won't fit naturally).
+
+## Don't misclassify subtasks
+A subtask should share the SEMANTIC purpose of its parent. "Set up B2B workspace" should NOT have "Configure WireGuard VPN" as a child — VPN is infrastructure, not B2B setup. If the work genuinely belongs to a different domain, make it a separate top-level task (and find/create the right parent for it).
+
 ## Task fields
 - title: 5-15 words, specific and descriptive
 - tags: project name, area, technology (multiple encouraged)
