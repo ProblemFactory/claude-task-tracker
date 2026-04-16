@@ -165,7 +165,7 @@ Each task and update MUST have an origin + origin_reason:
 
 origin_reason: One sentence explaining your classification with specific evidence from the conversation.
 
-For UPDATES to existing tasks: only include origin/origin_reason if the origin actually CHANGES (e.g. agent_pending → user_confirmed because user just engaged). If origin stays the same, OMIT both fields — origin_reason captures WHY the task was originally classified, it must NOT be overwritten with reasons for unrelated later updates.
+For UPDATES to existing tasks: only include origin/origin_reason if the origin actually CHANGES (e.g. agent_pending → user_confirmed because user just engaged). If origin stays the same, OMIT both fields. The origin_reason is append-only — each transition adds a new dated line preserving the full history of why the task's classification evolved. Do NOT try to rewrite or "improve" the existing reason.
 
 ## Correcting outdated task metadata
 If the conversation reveals that a task's title, tags, category, or priority is now WRONG or OUTDATED (e.g. customer name was wrong, scope changed, project misidentified), include corrected fields in the update. Don't leave stale metadata. Examples:
@@ -327,11 +327,14 @@ function applyResult(result, sessionId, cwd) {
     if (u.context_append) {
       updates.context = (task.context ? task.context + ' ' : '') + u.context_append;
     }
-    // Origin transitions: only update reason when origin actually changes
-    // origin_reason should preserve the ORIGINAL evidence for why this task was created/classified
+    // Origin transitions: append a new reason line when origin actually changes
+    // origin_reason is append-only history of all classification decisions
     if (u.origin && VALID_ORIGINS.includes(u.origin) && task.origin !== 'user_initiated' && u.origin !== task.origin) {
       updates.origin = u.origin;
-      if (u.origin_reason) updates.origin_reason = u.origin_reason;
+      if (u.origin_reason) {
+        const entry = `[${today}] ${task.origin} \u2192 ${u.origin}: ${u.origin_reason}`;
+        updates.origin_reason = (task.origin_reason ? task.origin_reason + '\n' : '') + entry;
+      }
     }
     updateTask(task.id, updates);
     addSessionLink({ taskId: task.id, sessionId, project: cwd, role: u.status === 'done' ? 'completed' : 'progressed', summary: u.notes });
