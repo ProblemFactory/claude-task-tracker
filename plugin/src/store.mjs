@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { getDataDir, loadConfig } from './config.mjs';
+import * as chroma from './chroma.mjs';
 
 const DIR = getDataDir();
 const DB_PATH = join(DIR, 'tasks.db');
@@ -165,7 +166,11 @@ export function createTask({ title, status, priority, notes, tags, parentId, ori
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(title, status || 'open', priority || 'normal', notes || '', JSON.stringify(tags || []),
     parentId || null, origin || 'user_initiated', originReason || '', category || '', context || '', now, now);
-  return Number(result.lastInsertRowid);
+  const id = Number(result.lastInsertRowid);
+  // Fire-and-forget chroma upsert
+  const task = getTaskById(id);
+  if (task) chroma.upsertTask(task).catch(() => {});
+  return id;
 }
 
 export function updateTask(id, updates) {
@@ -183,6 +188,12 @@ export function updateTask(id, updates) {
   }
   vals.push(id);
   db.prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  // Only re-index when content-relevant fields changed
+  const indexedFields = ['title', 'tags', 'category', 'context', 'status', 'priority', 'parent_id', 'parentId'];
+  if (Object.keys(updates).some(k => indexedFields.includes(k))) {
+    const task = getTaskById(id);
+    if (task) chroma.upsertTask(task).catch(() => {});
+  }
 }
 
 export function taskExistsByTitle(title) {

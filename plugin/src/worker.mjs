@@ -8,6 +8,7 @@ import {
   addSessionLink, getRecentLinks, getAnalysisState, setAnalysisState,
   queryTasks, renderMarkdown, DIR
 } from './store.mjs';
+import * as chroma from './chroma.mjs';
 import { readTranscriptDelta, summarizeMessages } from './ai.mjs';
 import { loadConfig, saveConfig, getDefaults } from './config.mjs';
 
@@ -104,25 +105,86 @@ async function runAnalysis(job) {
 
   const allTasks = getAllTasks();
   const openTasks = allTasks.filter(t => t.status !== 'done');
-  const taskList = openTasks.length
-    ? openTasks.map(t => {
-        const indent = t.parentId ? '  ' : '';
-        const parent = t.parentId ? ` (subtask of #${t.parentId})` : '';
-        const subs = getSubtasks(t.id).filter(s => s.status !== 'done');
-        const subInfo = subs.length ? ` [${subs.length} active subtasks]` : '';
-        const ctx = t.context ? ` — ${t.context.slice(0, 150)}` : '';
-        return `${indent}[#${t.id}] "${t.title}" (${t.status}/${t.origin}) [${t.tags.join(',')}]${parent}${subInfo}${ctx}`;
-      }).join('\n')
-    : '(no tasks yet)';
+  const taskById = new Map(allTasks.map(t => [t.id, t]));
 
-  const prompt = `You are a task tracker analyzing development conversations. Be thorough — extract as much structured information as possible.
+  // ── Pre-retrieval: build the candidate task set shown to AI ──
+  // Strategy: (1) all tasks linked to this cwd, (2) top-K semantically related via chroma
+  // (3) all top-level parents of anything selected (for context on hierarchy)
+  const selected = new Set();
+
+  // 1. Project-local tasks (any task with a session_link to this cwd, recursively up)
+  const cwdLower = (cwd || '').toLowerCase();
+  for (const t of openTasks) {
+    if ((t.tags || []).some(tag => cwdLower.includes(tag.toLowerCase()))) selected.add(t.id);
+  }
+
+  // 2. Chroma semantic search (query = conversation summary's first chunk)
+  const queryText = summary.slice(0, 2500);
+  const chromaHits = await chroma.queryTasks(queryText, 15).catch(() => null);
+  if (chromaHits) for (const id of chromaHits) if (taskById.has(id)) selected.add(id);
+
+  // 3. Always include active (in_progress) top-level tasks so AI sees what's live
+  for (const t of openTasks) {
+    if (!t.parentId && t.status === 'in_progress') selected.add(t.id);
+  }
+
+  // 4. Walk up: for every selected task include its parent chain (context on hierarchy)
+  const withAncestors = new Set(selected);
+  for (const id of selected) {
+    let cur = taskById.get(id);
+    while (cur?.parentId && !withAncestors.has(cur.parentId)) {
+      withAncestors.add(cur.parentId);
+      cur = taskById.get(cur.parentId);
+    }
+  }
+  // 5. Also pull in direct children of any selected task so updates can reference them
+  for (const t of allTasks) {
+    if (t.parentId && withAncestors.has(t.parentId)) withAncestors.add(t.id);
+  }
+
+  const candidates = [...withAncestors].map(id => taskById.get(id)).filter(Boolean);
+  const candidateIds = new Set(candidates.map(t => t.id));
+
+  // Render hierarchically: roots first, then subtasks indented
+  const roots = candidates.filter(t => !t.parentId || !candidateIds.has(t.parentId));
+  const lines = [];
+  function renderLine(t, depth) {
+    const indent = '  '.repeat(depth);
+    const parent = t.parentId ? ` (subtask of #${t.parentId})` : '';
+    const ctx = t.context ? ` — ${t.context.slice(0, 150)}` : '';
+    const subs = getSubtasks(t.id).filter(s => s.status !== 'done');
+    const subInfo = subs.length ? ` [${subs.length} active subtasks]` : '';
+    lines.push(`${indent}[#${t.id}] "${t.title}" (${t.status}/${t.origin}) [${(t.tags || []).join(',')}]${parent}${subInfo}${ctx}`);
+    for (const c of candidates.filter(ch => ch.parentId === t.id)) renderLine(c, depth + 1);
+  }
+  for (const r of roots) renderLine(r, 0);
+
+  const taskList = lines.length
+    ? lines.join('\n')
+    : '(no tasks yet)';
+  const retrievalStats = `[retrieval] ${candidates.length} candidates shown out of ${openTasks.length} open tasks (chroma=${chromaHits ? chromaHits.length : 'unavailable'})`;
+
+  const prompt = `You are a task tracker analyzing development conversations. Record what WAS DONE / DECIDED / STARTED / BLOCKED in this conversation. You are NOT a planner or researcher — your sole output is updates to the task DB.
 
 Current date and time: ${new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC
 
+## When to skip
+Return \`{"updates":[],"new_tasks":[],"session_summary":""}\` — no prose — if the conversation is:
+- Greeting / clarification / thinking aloud with no decisions made
+- A routine operation already covered by an existing task update
+- Too short or ambiguous to create a meaningful task
+
+## Task creation rules
 GLOBAL task list — tasks are NOT tied to folders. Same feature may span sessions.
 Match work to existing tasks by SEMANTIC similarity. "task" = meaningful work unit.
 Don't create tasks for greetings, clarifications, routine git ops.
 Only update status with CLEAR evidence.
+
+## IMPORTANT: The candidate list below is FILTERED, not exhaustive
+You see a pre-retrieved subset (project-relevant + semantically similar + active top-level tasks + their parent/child context). The full DB has many more tasks you cannot see here. Implications:
+- If work seems NEW based on this list, it might still match an unseen task. Prefer updating over creating when in doubt, BUT only if the match within this candidate list is strong.
+- Never assume a task doesn't exist just because it's not in this list — just don't create duplicates of things you CAN see.
+- Use the semantic candidates (shown first in the list) as your primary match surface.
 
 ## Stale task review + organization review
 Each analysis, also review the existing tasks:
@@ -195,7 +257,7 @@ If the conversation reveals that a task's title, tags, category, or priority is 
 Status: open | in_progress | done | blocked
 Priority: low | normal | high
 
-## Current Open Tasks
+## Candidate tasks (filtered subset, NOT the full DB)
 ${taskList}
 
 ## Session ${sessionId.slice(0, 8)} at ${cwd}
@@ -214,6 +276,7 @@ ${cfg.language && cfg.language !== 'auto' ? `\nIMPORTANT: Write ALL text fields 
     applyResult(result, sessionId, cwd);
     setAnalysisState(sessionId, newOffset);
     renderMarkdown();
+    log(`${retrievalStats}`);
     log(`Analyzed: ${result.updates?.length || 0} updates, ${result.new_tasks?.length || 0} new. "${result.session_summary || ''}"`);
   }
 }
@@ -504,9 +567,33 @@ process.on('SIGINT', shutdown);
 
 // ── Start ──
 
+async function initChroma() {
+  chroma.setChromaLogger(log);
+  const ok = await chroma.isAvailable();
+  if (!ok) {
+    log('chroma unavailable — semantic retrieval disabled (BM25 fallback only)');
+    return;
+  }
+  // Backfill: ensure existing tasks are indexed. Cheap if already there (upsert).
+  // Only backfill if meta flag says we haven't, to avoid re-indexing every start.
+  try {
+    const all = getAllTasks();
+    log(`chroma backfill: indexing ${all.length} tasks (async)`);
+    (async () => {
+      for (const t of all) {
+        await chroma.upsertTask(t);
+      }
+      log('chroma backfill complete');
+    })();
+  } catch (e) {
+    log(`backfill error: ${e.message}`);
+  }
+}
+
 async function main() {
   mkdirSync(DIR, { recursive: true });
   await loadSDK();
+  initChroma().catch(e => log(`chroma init error: ${e.message}`));
   server.listen(PORT, config.host, () => {
     writePid();
     log(`Worker started on ${config.host}:${PORT}, pid ${process.pid}`);
