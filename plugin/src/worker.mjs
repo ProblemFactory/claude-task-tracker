@@ -9,6 +9,7 @@ import {
   queryTasks, renderMarkdown, DIR
 } from './store.mjs';
 import * as chroma from './chroma.mjs';
+import { buildTools } from './tools.mjs';
 import { readTranscriptDelta, summarizeMessages } from './ai.mjs';
 import { loadConfig, saveConfig, getDefaults } from './config.mjs';
 
@@ -34,11 +35,16 @@ function log(msg) {
 // ── AI via Agent SDK query() ──
 
 let queryFn = null;
+let toolFn = null;
+let createSdkMcpServerFn = null;
+let zodLib = null;
+let mcpServerInstance = null;
 
 async function loadSDK() {
   const candidates = [
     '@anthropic-ai/claude-agent-sdk',
   ];
+  let sdkBasePath = null;
   try {
     const { execSync } = await import('child_process');
     const globalRoot = execSync('npm root -g', { encoding: 'utf-8' }).trim();
@@ -64,18 +70,70 @@ async function loadSDK() {
     try {
       const mod = await import(loc);
       queryFn = mod.query || mod.default?.query;
-      if (queryFn) { log(`Agent SDK loaded from ${loc}`); return true; }
+      if (queryFn) {
+        toolFn = mod.tool || mod.default?.tool;
+        createSdkMcpServerFn = mod.createSdkMcpServer || mod.default?.createSdkMcpServer;
+        sdkBasePath = loc;
+        log(`Agent SDK loaded from ${loc}`);
+        break;
+      }
     } catch {}
     try {
       const { createRequire } = await import('module');
       const require = createRequire(import.meta.url);
       const mod = require(loc);
       queryFn = mod.query;
-      if (queryFn) { log(`Agent SDK loaded (CJS) from ${loc}`); return true; }
+      if (queryFn) {
+        toolFn = mod.tool;
+        createSdkMcpServerFn = mod.createSdkMcpServer;
+        sdkBasePath = loc;
+        log(`Agent SDK loaded (CJS) from ${loc}`);
+        break;
+      }
     } catch {}
   }
-  log('Agent SDK not found in any location');
-  return false;
+  if (!queryFn) { log('Agent SDK not found in any location'); return false; }
+
+  // Load zod sibling to SDK (task-master-ai/node_modules/zod etc.)
+  if (sdkBasePath && sdkBasePath.startsWith('/')) {
+    try {
+      const { join: pjoin } = await import('path');
+      const { existsSync: ex } = await import('fs');
+      // Try zod located as a sibling in the same node_modules tree
+      let cur = sdkBasePath;
+      while (cur && cur !== '/') {
+        const zodPath = pjoin(cur, '..', '..', 'zod');
+        if (ex(zodPath)) {
+          const { createRequire } = await import('module');
+          const require = createRequire(import.meta.url);
+          try { zodLib = require(zodPath).z || require(zodPath); break; } catch {}
+        }
+        const parent = pjoin(cur, '..');
+        if (parent === cur) break;
+        cur = parent;
+      }
+    } catch {}
+  }
+  if (!zodLib) log('zod not found — MCP tools will be disabled');
+  return true;
+}
+
+function buildMcpServer() {
+  if (mcpServerInstance) return mcpServerInstance;
+  if (!toolFn || !createSdkMcpServerFn || !zodLib) return null;
+  try {
+    const tools = buildTools({ tool: toolFn, z: zodLib });
+    mcpServerInstance = createSdkMcpServerFn({
+      name: 'task-tracker-query',
+      version: '1.0.0',
+      tools,
+    });
+    log(`MCP server built with ${tools.length} tools`);
+    return mcpServerInstance;
+  } catch (e) {
+    log(`MCP server build failed: ${e.message}`);
+    return null;
+  }
 }
 
 // Queue
@@ -118,8 +176,8 @@ async function runAnalysis(job) {
     if ((t.tags || []).some(tag => cwdLower.includes(tag.toLowerCase()))) selected.add(t.id);
   }
 
-  // 2. Chroma semantic search (query = conversation summary's first chunk)
-  const queryText = summary.slice(0, 2500);
+  // 2. Chroma semantic search — HyDE via Haiku extracts task-like phrases first
+  const queryText = await extractSearchQuery(summary);
   const chromaHits = await chroma.queryTasks(queryText, 15).catch(() => null);
   if (chromaHits) for (const id of chromaHits) if (taskById.has(id)) selected.add(id);
 
@@ -182,9 +240,21 @@ Only update status with CLEAR evidence.
 
 ## IMPORTANT: The candidate list below is FILTERED, not exhaustive
 You see a pre-retrieved subset (project-relevant + semantically similar + active top-level tasks + their parent/child context). The full DB has many more tasks you cannot see here. Implications:
-- If work seems NEW based on this list, it might still match an unseen task. Prefer updating over creating when in doubt, BUT only if the match within this candidate list is strong.
-- Never assume a task doesn't exist just because it's not in this list — just don't create duplicates of things you CAN see.
-- Use the semantic candidates (shown first in the list) as your primary match surface.
+- If work seems NEW based on this list, it might still match an unseen task. Prefer updating over creating when in doubt.
+- Never assume a task doesn't exist just because it's not in this list.
+
+## Tools (use them when the candidate list is insufficient)
+You have MCP tools from \`task-tracker\`:
+- \`mcp__task-tracker__search_tasks\`: semantic search with a free-text query. Use this if the conversation mentions a topic/project/customer that isn't in the candidate list — you might find a better match.
+- \`mcp__task-tracker__get_task\`: fetch full details (context, notes, origin history, recent sessions) for one task id. Use this when you need to verify a match is correct before updating, or when understanding a parent's scope before creating a subtask.
+- \`mcp__task-tracker__get_task_tree\`: see all descendants of a parent. Use this when considering reparenting — check the parent's current children first.
+- \`mcp__task-tracker__list_tasks\`: filter by status/tag/project/category/origin/parentId.
+
+When to use tools:
+- Big new feature mentioned, nothing similar in candidates → search first
+- About to create a top-level task → search to double-check no better parent exists
+- About to reparent something → get_task on the candidate parent to confirm it fits
+Don't over-use tools. If the candidate list clearly contains the right match, just update.
 
 ## Stale task review + organization review
 Each analysis, also review the existing tasks:
@@ -281,6 +351,69 @@ ${cfg.language && cfg.language !== 'auto' ? `\nIMPORTANT: Write ALL text fields 
   }
 }
 
+// HyDE: Use Haiku to extract task-relevant topic phrases from the raw conversation.
+// This improves chroma's embedding retrieval because the query text is now in the
+// same "task description" style as the indexed task.context / task.title fields.
+async function extractSearchQuery(conversationSummary) {
+  if (!queryFn) return conversationSummary.slice(0, 2500);
+  try {
+    const prompt = `Extract 3-5 short phrases describing the TASKS / WORK / TOPICS in this conversation. These phrases will be used as a semantic search query against an existing task database.
+
+Rules:
+- Each phrase: 3-8 words, noun-phrase style, specific technical/domain keywords
+- Include: feature names, bug descriptions, file/module names, customer/project names, technologies
+- Exclude: greetings, chit-chat, generic verbs ("discussed", "asked"), meta-commentary
+- Output ONE phrase per line, no bullets, no prose, no explanation
+
+Conversation:
+${conversationSummary.slice(0, 6000)}
+
+Phrases:`;
+
+    const sessionsDir = join(DIR, 'observer-sessions');
+    mkdirSync(sessionsDir, { recursive: true });
+    const iter = queryFn({
+      prompt,
+      options: {
+        model: 'haiku',
+        maxTurns: 1,
+        cwd: sessionsDir,
+        disallowedTools: ['Bash','Read','Write','Edit','Grep','Glob','WebFetch','WebSearch','TodoWrite','NotebookEdit','Agent'],
+      },
+    });
+    let text = '';
+    const timeout = new Promise(r => setTimeout(() => r(null), 12000));
+    const collect = (async () => {
+      for await (const msg of iter) {
+        if (msg.type === 'assistant' && msg.message?.content) {
+          for (const block of msg.message.content) {
+            if (block.type === 'text') text += block.text;
+          }
+        }
+      }
+      return 'done';
+    })();
+    const outcome = await Promise.race([collect, timeout]);
+    if (outcome !== 'done') {
+      log('HyDE timeout, falling back to raw summary');
+      return conversationSummary.slice(0, 2500);
+    }
+    const phrases = text
+      .replace(/```+[a-z]*|```+/g, '')
+      .trim()
+      .split('\n')
+      .map(l => l.trim().replace(/^[-*•]\s*/, ''))
+      .filter(l => l && l.length < 150)
+      .slice(0, 8);
+    if (!phrases.length) return conversationSummary.slice(0, 2500);
+    log(`HyDE phrases: ${phrases.join(' | ')}`);
+    return phrases.join('\n');
+  } catch (e) {
+    log(`HyDE error: ${e.message}`);
+    return conversationSummary.slice(0, 2500);
+  }
+}
+
 async function analyzeWithSDK(prompt) {
   const cfg = loadConfig();
   return new Promise(async (resolve) => {
@@ -288,15 +421,17 @@ async function analyzeWithSDK(prompt) {
     try {
       const sessionsDir = join(DIR, 'observer-sessions');
       mkdirSync(sessionsDir, { recursive: true });
-      const iter = queryFn({
-        prompt,
-        options: {
-          model: cfg.model,
-          maxTurns: cfg.maxTurns,
-          cwd: sessionsDir,
-          disallowedTools: ['Bash','Read','Write','Edit','Grep','Glob','WebFetch','WebSearch','TodoWrite','NotebookEdit','Agent'],
-        },
-      });
+      const mcpServer = buildMcpServer();
+      const opts = {
+        model: cfg.model,
+        maxTurns: mcpServer ? Math.max(cfg.maxTurns, 5) : cfg.maxTurns,
+        cwd: sessionsDir,
+        disallowedTools: ['Bash','Read','Write','Edit','Grep','Glob','WebFetch','WebSearch','TodoWrite','NotebookEdit','Agent'],
+      };
+      if (mcpServer) {
+        opts.mcpServers = { 'task-tracker': mcpServer };
+      }
+      const iter = queryFn({ prompt, options: opts });
       let fullText = '';
       for await (const msg of iter) {
         if (msg.type === 'assistant' && msg.message?.content) {
