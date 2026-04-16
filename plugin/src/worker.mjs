@@ -167,6 +167,12 @@ origin_reason: One sentence explaining your classification with specific evidenc
 
 For UPDATES to existing tasks: if a task was "agent_pending" and user now engages with it → upgrade to "user_confirmed" or "user_implicit". If user's subsequent messages ignore it → downgrade to "agent_ignored".
 
+## Correcting outdated task metadata
+If the conversation reveals that a task's title, tags, category, or priority is now WRONG or OUTDATED (e.g. customer name was wrong, scope changed, project misidentified), include corrected fields in the update. Don't leave stale metadata. Examples:
+- Task title says "Sierra customer support" but conversation reveals it's actually Ello → update title and tags
+- Task tagged "frontend" but turned out to be a backend issue → update tags
+- Priority was "normal" but user said it's urgent → update priority
+
 Status: open | in_progress | done | blocked
 Priority: low | normal | high
 
@@ -179,7 +185,7 @@ ${taskList}
 ${summary.slice(0, cfg.maxPromptChars)}
 
 Respond with ONLY JSON:
-{"updates":[{"task_id":N,"status":"...","notes":"[date] specific changes","origin":"user_initiated","origin_reason":"evidence","context_append":"new info (optional)","parent_id":null}],"new_tasks":[{"title":"...","status":"in_progress","priority":"normal","tags":["project","area","tech"],"category":"feature","context":"Rich: why it exists + what's involved + key files + decisions. 2-5 sentences.","notes":"[date] what happened","parent_id":null,"origin":"user_initiated","origin_reason":"evidence"}],"session_summary":"one line"}
+{"updates":[{"task_id":N,"status":"...","notes":"specific changes","origin":"user_initiated","origin_reason":"evidence","context_append":"new info (optional)","parent_id":null,"title":"only if outdated","tags":["only if outdated"],"category":"only if outdated","priority":"only if changed"}],"new_tasks":[{"title":"...","status":"in_progress","priority":"normal","tags":["project","area","tech"],"category":"feature","context":"Rich: why it exists + what's involved + key files + decisions. 2-5 sentences.","notes":"[date] what happened","parent_id":null,"origin":"user_initiated","origin_reason":"evidence"}],"session_summary":"one line"}
 ${cfg.language && cfg.language !== 'auto' ? `\nIMPORTANT: Write ALL text fields in ${cfg.language}.` : '\nIMPORTANT: Write all text fields in the SAME language the user uses in the conversation.'}`;
 
   if (!queryFn) { log('No SDK available, skipping analysis'); return; }
@@ -302,6 +308,11 @@ function applyResult(result, sessionId, cwd) {
     if (u.status) updates.status = u.status;
     if (u.notes) updates.notes = (task.notes ? task.notes + '\n' : '') + `[${today}] ${u.notes}`;
     if (u.status === 'done') updates.completedAt = now;
+    // Metadata corrections
+    if (u.title && typeof u.title === 'string' && u.title.trim() && u.title !== task.title) updates.title = u.title.trim();
+    if (Array.isArray(u.tags) && u.tags.length) updates.tags = u.tags;
+    if (u.category && typeof u.category === 'string' && u.category !== task.category) updates.category = u.category;
+    if (u.priority && ['low','normal','high'].includes(u.priority)) updates.priority = u.priority;
     // Reparenting: resolve "NEW:title" to actual ID, or use numeric parent_id
     if (u.parent_id != null) {
       if (typeof u.parent_id === 'string' && u.parent_id.startsWith('NEW:')) {
