@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="plugin/src/assets/icons/icon.svg" width="96" alt="claude-task-tracker">
+</p>
+
 # claude-task-tracker
 
 Passive task tracking for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Observes your conversations via hooks, uses AI to infer task creation/progress/completion, and maintains a global task database with a web dashboard.
