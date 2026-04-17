@@ -12,7 +12,7 @@ const DEFAULTS = {
 
   // AI
   model: 'sonnet',
-  analysisTimeout: 25000,
+  analysisTimeout: 60000,
   maxTurns: 1,
 
   // Analysis thresholds
