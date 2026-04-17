@@ -202,7 +202,16 @@ async function runAnalysis(job) {
     if (t.parentId && withAncestors.has(t.parentId)) withAncestors.add(t.id);
   }
 
-  const candidates = [...withAncestors].map(id => taskById.get(id)).filter(Boolean);
+  // Cap candidate count to avoid prompt bloat (122 candidates caused timeouts)
+  const MAX_CANDIDATES = 50;
+  let candidatePool = [...withAncestors].map(id => taskById.get(id)).filter(Boolean);
+  if (candidatePool.length > MAX_CANDIDATES) {
+    // Prioritize: selected (direct hits) > ancestors > children
+    const directHits = candidatePool.filter(t => selected.has(t.id));
+    const others = candidatePool.filter(t => !selected.has(t.id));
+    candidatePool = [...directHits, ...others].slice(0, MAX_CANDIDATES);
+  }
+  const candidates = candidatePool;
   const candidateIds = new Set(candidates.map(t => t.id));
 
   // Render hierarchically: roots first, then subtasks indented
@@ -369,12 +378,17 @@ ${cfg.language && cfg.language !== 'auto' ? `\nIMPORTANT: Write ALL text fields 
   if (!queryFn) { log('No SDK available, skipping analysis'); return; }
 
   const result = await analyzeWithSDK(prompt);
+  // Always advance offset — even on timeout/empty, to avoid re-processing the same delta forever.
+  // The next hook trigger will capture new messages beyond this point.
+  setAnalysisState(sessionId, newOffset);
   if (result) {
     applyResult(result, sessionId, cwd);
-    setAnalysisState(sessionId, newOffset);
     renderMarkdown();
     log(`${retrievalStats}`);
     log(`Analyzed: ${result.updates?.length || 0} updates, ${result.new_tasks?.length || 0} new. "${result.session_summary || ''}"`);
+  } else {
+    log(`${retrievalStats}`);
+    log(`Analysis returned null (timeout or error) — offset advanced to ${newOffset} to avoid retry loop`);
   }
 }
 
