@@ -158,8 +158,10 @@ async function runAnalysis(job) {
   const { messages, newOffset } = readTranscriptDelta(transcriptPath, state.offset);
 
   if (!messages.length) return;
-  const summary = summarizeMessages(messages);
-  // First analysis of a session: read the full transcript, don't skip regardless of size
+  // First analysis: use a larger summary window to capture the full conversation arc
+  const summaryLimit = isFirstAnalysis ? cfg.maxSummaryChars * 4 : undefined;
+  const summary = summarizeMessages(messages, summaryLimit);
+  // First analysis of a session: don't skip regardless of size
   if (!isFirstAnalysis && !isFinal && summary.length < cfg.minDeltaChars) return;
   if (summary.length < cfg.minSummaryChars) return;
 
@@ -369,7 +371,7 @@ ${taskList}
 ## Session ${sessionId.slice(0, 8)} at ${cwd}${isFirstAnalysis ? '\nNOTE: This is the FIRST analysis of this session — you are seeing the FULL conversation history, not just a delta. Establish all relevant tasks from scratch for this session.' : ''}
 
 ## Conversation
-${summary.slice(0, cfg.maxPromptChars)}
+${summary.slice(0, isFirstAnalysis ? cfg.maxPromptChars * 4 : cfg.maxPromptChars)}
 
 Respond with ONLY JSON:
 {"updates":[{"task_id":N,"status":"...","notes":"specific changes","origin":"user_initiated","origin_reason":"evidence","context_append":"new info (optional)","parent_id":null,"title":"only if outdated","tags":["only if outdated"],"category":"only if outdated","priority":"only if changed"}],"new_tasks":[{"title":"...","status":"in_progress","priority":"normal","tags":["project","area","tech"],"category":"feature","context":"Rich: why it exists + what's involved + key files + decisions. 2-5 sentences.","notes":"[date] what happened","parent_id":null,"origin":"user_initiated","origin_reason":"evidence"}],"session_summary":"one line"}
