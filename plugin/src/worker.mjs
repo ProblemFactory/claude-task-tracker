@@ -222,7 +222,29 @@ async function runAnalysis(job) {
   const taskList = lines.length
     ? lines.join('\n')
     : '(no tasks yet)';
-  const retrievalStats = `[retrieval] ${candidates.length} candidates shown out of ${openTasks.length} open tasks (chroma=${chromaHits ? chromaHits.length : 'unavailable'})`;
+
+  // Build root task reference list for parent-assignment validation
+  const allRoots = allTasks.filter(t => !t.parentId);
+  const rootsInCandidates = new Set(candidates.filter(t => !t.parentId).map(t => t.id));
+  // Also query chroma for semantically related roots not already in candidates
+  const rootChromaHits = await chroma.queryTasks(queryText, 10, { parent_id: -1 }).catch(() => null);
+  const extraRootIds = new Set();
+  if (rootChromaHits) for (const id of rootChromaHits) {
+    if (!rootsInCandidates.has(id) && taskById.has(id)) extraRootIds.add(id);
+  }
+  // Merge: candidate roots + chroma-discovered roots + cwd-linked roots
+  const rootRefIds = new Set([...rootsInCandidates, ...extraRootIds]);
+  // Add roots linked to this cwd via session_links
+  for (const t of allRoots) {
+    if ((t.tags || []).some(tag => cwdLower.includes(tag.toLowerCase()))) rootRefIds.add(t.id);
+  }
+  const rootRefList = [...rootRefIds]
+    .map(id => taskById.get(id))
+    .filter(Boolean)
+    .map(t => `  [#${t.id}] "${t.title}" [${(t.tags||[]).join(',')}] — ${(t.context||'').slice(0,100)}`)
+    .join('\n');
+
+  const retrievalStats = `[retrieval] ${candidates.length} candidates shown out of ${openTasks.length} open tasks (chroma=${chromaHits ? chromaHits.length : 'unavailable'}, roots=${rootRefIds.size})`;
 
   const prompt = `You are a task tracker analyzing development conversations. Record what WAS DONE / DECIDED / STARTED / BLOCKED in this conversation. You are NOT a planner or researcher — your sole output is updates to the task DB.
 
@@ -264,16 +286,19 @@ Each analysis, also review the existing tasks:
 - Look for REPARENTING opportunities: if two or more top-level tasks are actually parts of the same larger effort, create or identify a parent and move them under it via the reparenting mechanism.
 - Check if a parent task was incorrectly marked done: if it represents ongoing work but was auto-completed, reopen it.
 
-## Before creating a new top-level task — check for natural parents
-Creating too many top-level tasks makes the dashboard cluttered. Before setting parent_id: null on a new task, scan the existing list for:
-- **Same project/product parent**: e.g. "Build Claude Code WebUI" owns all UI bug fixes / features for that webui
-- **Same customer/client parent**: e.g. "Ello customer support" owns all technical questions from that customer
-- **Same topic/domain parent**: e.g. "Personal health research" owns all blood-test/wearable-device research
-- **Same plugin/dependency parent**: e.g. "claude-mem maintenance" owns all upgrade/patch/config tasks for that plugin
-If a natural parent exists (even vaguely), put the new task under it. Only use parent_id: null for tasks that are genuinely standalone.
+## MANDATORY: Parent assignment check for new tasks
+Before creating ANY new task, you MUST check if it belongs under an existing root task.
+Here are the root-level project/container tasks (semantically related to this session + linked to this cwd):
 
-## Parent task naming
-When creating a parent container, pick a title that reflects its ONGOING scope, not a single milestone. Good: "Build X system", "Support Y customer", "Research Z topic". Bad: "Implement feature A" (too narrow — future work for X won't fit naturally).
+${rootRefList || '(none found)'}
+
+For EVERY new task you create:
+1. Check the root list above. If the work clearly belongs under one of them → set parent_id to that root's id.
+2. If uncertain, use the search_tasks tool to look for a better parent.
+3. ONLY set parent_id: null if the work is genuinely a NEW domain/project/client not covered by ANY existing root.
+4. If you DO create a new root task, use an ONGOING scope title: "Build X system", "Support Y customer", "Research Z topic" — not narrow one-off titles.
+
+Creating unnecessary root tasks is a quality failure. Every manual reparent costs human effort.
 
 ## Don't misclassify subtasks
 A subtask should share the SEMANTIC purpose of its parent. "Set up B2B workspace" should NOT have "Configure WireGuard VPN" as a child — VPN is infrastructure, not B2B setup. If the work genuinely belongs to a different domain, make it a separate top-level task (and find/create the right parent for it).
