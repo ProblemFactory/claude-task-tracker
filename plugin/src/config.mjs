@@ -54,7 +54,25 @@ export function loadConfig() {
     }
   }
 
-  _config = { ...DEFAULTS, ...fileConfig, ...envOverrides };
+  const merged = { ...DEFAULTS, ...fileConfig, ...envOverrides };
+
+  // Auto-upgrade stale config values from older plugin versions
+  let dirty = false;
+  if (fileConfig.analysisTimeout && fileConfig.analysisTimeout < DEFAULTS.analysisTimeout) {
+    merged.analysisTimeout = DEFAULTS.analysisTimeout;
+    fileConfig.analysisTimeout = DEFAULTS.analysisTimeout;
+    dirty = true;
+  }
+  if (fileConfig.model && (fileConfig.model === 'sonnet' || fileConfig.model === 'claude-sonnet-4-5-20250929')) {
+    merged.model = DEFAULTS.model;
+    fileConfig.model = DEFAULTS.model;
+    dirty = true;
+  }
+  if (dirty) {
+    try { writeFileSync(CONFIG_FILE, JSON.stringify({ ...fileConfig }, null, 2)); } catch {}
+  }
+
+  _config = merged;
   return _config;
 }
 
