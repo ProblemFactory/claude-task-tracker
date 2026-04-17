@@ -140,10 +140,11 @@ setTimeout(() => process.exit(0), 8000);
 async function main(input) {
   const event = input.hook_event_name;
 
-  // Guard: skip our own SDK sessions (prevents infinite loop)
-  // Compare against the exact observer cwd reported by worker, or fall back to config-derived path
+  // Guard: skip ALL observer/synthetic sessions (ours, claude-mem's, any plugin's)
+  // 1. Exact match against our own observer cwd from worker /health
+  // 2. Broad match: any cwd ending in "observer-sessions" (convention shared by claude-mem etc.)
   const observerCwd = _observerCwd || join(homedir(), '.claude', 'task-tracker', 'observer-sessions');
-  if (input.cwd && input.cwd.startsWith(observerCwd)) {
+  if (input.cwd && (input.cwd.startsWith(observerCwd) || input.cwd.endsWith('observer-sessions'))) {
     return null;
   }
 
