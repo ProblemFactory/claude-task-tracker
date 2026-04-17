@@ -282,8 +282,15 @@ function getFilteredExcludingStatus() {
 
 function renderStatusPills() {
   const relevantTasks = getFilteredExcludingStatus();
+  // Count by root task status (what actually appears as section entries)
+  // Subtasks are rendered inside their root's card, not as independent entries
+  const rootSet = new Map();
+  for (const t of relevantTasks) {
+    const root = findRoot(t);
+    if (!rootSet.has(root.id)) rootSet.set(root.id, root);
+  }
   const counts = {};
-  for (const t of relevantTasks) counts[t.status] = (counts[t.status]||0) + 1;
+  for (const [, r] of rootSet) counts[r.status] = (counts[r.status]||0) + 1;
   const statuses = ['open','in_progress','blocked','done'];
   const labels = { open:'Open', in_progress:'In Progress', blocked:'Blocked', done:'Done' };
   const el = document.getElementById('status-pills');
@@ -410,6 +417,18 @@ function getSubtasks(parentId) {
   return allTasks.filter(t => t.parentId === parentId);
 }
 
+function findRoot(t) {
+  let cur = t;
+  const seen = new Set();
+  while (cur.parentId && !seen.has(cur.parentId)) {
+    seen.add(cur.parentId);
+    const p = allTasks.find(x => x.id === cur.parentId);
+    if (!p) break;
+    cur = p;
+  }
+  return cur;
+}
+
 function renderSubtaskList(parentId) {
   const subs = getSubtasks(parentId);
   if (!subs.length) return '';
@@ -511,18 +530,6 @@ function renderTasks() {
   const expandState = saveExpandState();
 
   // Root tasks only — subtasks render inside their parent card
-  // Walk up to find the true root for any matched subtask
-  function findRoot(t) {
-    let cur = t;
-    const seen = new Set();
-    while (cur.parentId && !seen.has(cur.parentId)) {
-      seen.add(cur.parentId);
-      const p = allTasks.find(x => x.id === cur.parentId);
-      if (!p) break;
-      cur = p;
-    }
-    return cur;
-  }
   const rootSet = new Map();
   for (const t of filtered) {
     const root = findRoot(t);
