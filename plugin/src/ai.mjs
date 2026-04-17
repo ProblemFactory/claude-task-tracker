@@ -24,14 +24,14 @@ export function readTranscriptDelta(transcriptPath, lastOffset) {
   return { messages, newOffset: stat.size };
 }
 
-export function summarizeMessages(messages, maxChars) {
+export function summarizeMessages(messages, maxChars, { skipToolResults = false } = {}) {
   const config = loadConfig();
   maxChars = maxChars || config.maxSummaryChars;
   const parts = [];
   let total = 0;
   for (const msg of messages) {
     if (total >= maxChars) break;
-    const text = extractContent(msg);
+    const text = extractContent(msg, skipToolResults);
     if (!text) continue;
     const role = msg.type === 'human' ? 'User' : msg.type === 'assistant' ? 'Claude' : msg.type;
     const line = `[${role}]: ${text}`;
@@ -41,7 +41,7 @@ export function summarizeMessages(messages, maxChars) {
   return parts.join('\n\n');
 }
 
-function extractContent(msg) {
+function extractContent(msg, skipToolResults = false) {
   const c = msg.message?.content;
   if (!c) return '';
   if (typeof c === 'string') return c.slice(0, 1000);
@@ -51,6 +51,7 @@ function extractContent(msg) {
       if (b.type === 'text') return b.text;
       if (b.type === 'tool_use') return `[Tool: ${b.name}(${briefInput(b.input)})]`;
       if (b.type === 'tool_result') {
+        if (skipToolResults) return null;
         const t = typeof b.content === 'string' ? b.content : JSON.stringify(b.content || '');
         return `[Result: ${t.slice(0, 200)}]`;
       }

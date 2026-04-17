@@ -11,7 +11,7 @@ const DEFAULTS = {
   host: '0.0.0.0',
 
   // AI
-  model: 'sonnet',
+  model: 'claude-sonnet-4-6',
   analysisTimeout: 300000,
   maxTurns: 1,
 
