@@ -41,7 +41,7 @@ All at `~/.claude/task-tracker/`:
 - **Agent SDK for AI calls** — Uses `@anthropic-ai/claude-agent-sdk` query() function (same auth as Claude Code, ToS-compliant). SDK found by scanning global node_modules. Fallback via createRequire() for CJS packages.
 - **Incremental transcript analysis** — Tracks byte offset per session. Only reads new JSONL lines since last analysis. Avoids re-processing.
 - **Observer session isolation** — SDK query() gets `cwd: observer-sessions/` to prevent polluting user's project directories with session files. Cleanup is recursive (handles `subagents/` subdirs).
-- **Self-loop prevention** — Three-layer defense against infinite hook→worker→SDK→hook loops: (1) SDK sessions have all tools disallowed, (2) SDK runs in isolated cwd, (3) hook checks `input.cwd.startsWith(observerCwd)` using the exact path from worker `/health`. No substring matching — avoids false positives on user projects.
+- **Self-loop prevention** — Three-layer defense against infinite hook→worker→SDK→hook loops: (1) SDK sessions have all tools disallowed, (2) SDK runs in isolated cwd, (3) hook checks `input.cwd.startsWith(observerCwd)` using the exact path from worker `/health` + `endsWith('observer-sessions')` to also filter other plugins' observer sessions (e.g. claude-mem's). No substring matching on our own path — avoids false positives on user projects.
 - **SQLite over JSON** — Switched from data.json to node:sqlite (Node >= 22) for indexed queries and no full-file rewrite on every operation. Auto-migrates from data.json on first run.
 - **Subtask hierarchy** — Tasks have `parentId` field. AI prompt instructs to break large tasks into subtasks. Dashboard renders recursively — arbitrary depth supported (v1.7.0+). Parent completion is AI-decided, not auto-inferred (v1.7.1+), to avoid prematurely closing long-term container tasks.
 - **Global tasks** — Tasks are NOT tied to folders. AI matches work to existing tasks by semantic similarity across sessions and projects. Context field stores rich descriptions to improve matching.
@@ -50,7 +50,7 @@ All at `~/.claude/task-tracker/`:
 - **Datetime prompt injection** — Every AI prompt includes `Current date and time: YYYY-MM-DD HH:MM:SS UTC` to prevent AI from hallucinating dates from training data. Note prefixes use full timestamp `[YYYY-MM-DD HH:MM]`.
 - **Auto-restart on update** — Hook reads plugin.json version, compares with worker /health version. Mismatch triggers automatic shutdown + respawn. Users never need manual restarts after `claude plugins update`.
 - **Reparenting** — AI can move existing tasks under a new parent when it discovers they're part of a larger goal. Uses `parent_id: "NEW:Parent Title"` in updates, resolved after new tasks are created.
-- **Dashboard filters** — Six independent filters: Project (from session cwd), Status, Tag (from task.tags), Priority, Origin, Category. All AND-combined. Status pill counts reflect other active filters. Project filter propagates through task family (parent matches if any descendant matches).
+- **Dashboard filters** — Six independent filters: Project (from session cwd), Status, Tag (from task.tags), Priority, Origin, Category. All AND-combined. Status pill counts reflect ROOT tasks only (what appears as section cards), not subtasks. Project filter propagates through task family (parent matches if any descendant matches).
 - **Expand state preserved across refresh** — Dashboard auto-refreshes every 15s, but task card expansions, subtask expansions, and notes toggles are preserved using `data-task-id` attributes.
 - **Semantic retrieval pipeline** (v1.8.x) — Analysis prompt no longer dumps all open tasks. Pipeline:
   1. **HyDE** — conversation summary goes through Haiku which extracts 3-5 task-themed noun phrases
@@ -58,6 +58,8 @@ All at `~/.claude/task-tracker/`:
   3. **Candidate merge** — top-K semantic hits ∪ project-local tasks ∪ active in-progress top-level tasks ∪ family tree expansion
   4. **AI tools (optional)** — in-process MCP server exposes `search_tasks` / `get_task` / `get_task_tree` / `list_tasks` so Sonnet can dig deeper when candidate list is insufficient
   Fallback: if `uvx` is missing, BM25 ranker (`search.mjs`) is available but worker currently keeps candidate set without chroma; tools still expose hybrid search. Auto-backfill existing tasks on worker startup. `createTask`/`updateTask` fire-and-forget re-index when indexed fields change.
+- **Mandatory parent-check** (v1.8.3) — Prompt includes a dedicated root task reference list (chroma semantic search for roots + cwd-linked roots) and MANDATORY instructions: every new task must either match an existing root or justify creating a new one. Framed as "Creating unnecessary root tasks is a quality failure" to make AI conservative about `parent_id: null`.
+- **First-analysis full transcript** (v1.8.2) — When `offset === 0` (session never analyzed), bypasses `minDeltaChars` and reads full transcript. Prompt tells AI this is the first analysis, establish tasks from scratch. Fixes cold-start for pre-existing sessions.
 
 ## Development Notes
 
