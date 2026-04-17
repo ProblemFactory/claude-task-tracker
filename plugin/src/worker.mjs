@@ -154,11 +154,13 @@ async function runAnalysis(job) {
   const { sessionId, cwd, transcriptPath, isFinal } = job;
   const cfg = loadConfig();
   const state = getAnalysisState(sessionId);
+  const isFirstAnalysis = state.offset === 0;
   const { messages, newOffset } = readTranscriptDelta(transcriptPath, state.offset);
 
   if (!messages.length) return;
   const summary = summarizeMessages(messages);
-  if (!isFinal && summary.length < cfg.minDeltaChars) return;
+  // First analysis of a session: read the full transcript, don't skip regardless of size
+  if (!isFirstAnalysis && !isFinal && summary.length < cfg.minDeltaChars) return;
   if (summary.length < cfg.minSummaryChars) return;
 
   const allTasks = getAllTasks();
@@ -330,7 +332,7 @@ Priority: low | normal | high
 ## Candidate tasks (filtered subset, NOT the full DB)
 ${taskList}
 
-## Session ${sessionId.slice(0, 8)} at ${cwd}
+## Session ${sessionId.slice(0, 8)} at ${cwd}${isFirstAnalysis ? '\nNOTE: This is the FIRST analysis of this session — you are seeing the FULL conversation history, not just a delta. Establish all relevant tasks from scratch for this session.' : ''}
 
 ## Conversation
 ${summary.slice(0, cfg.maxPromptChars)}
