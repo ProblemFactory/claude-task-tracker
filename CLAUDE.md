@@ -39,7 +39,7 @@ All at `~/.claude/task-tracker/`:
 - **Hooks, not MCP** — Must be passive observation. MCP tools require the main Claude to actively call them, which it will forget to do. Hooks fire automatically on every event.
 - **Worker service pattern** — Hook is a short-lived process (stdin→POST→exit). Worker is a persistent background process that queues analysis jobs, runs AI, and serves the dashboard.
 - **Agent SDK for AI calls** — Uses `@anthropic-ai/claude-agent-sdk` query() function (same auth as Claude Code, ToS-compliant). SDK found by scanning global node_modules. Fallback via createRequire() for CJS packages.
-- **Incremental transcript analysis** — Tracks byte offset per session. Only reads new JSONL lines since last analysis. Avoids re-processing.
+- **Incremental transcript analysis** — Tracks byte offset per session. Only reads new JSONL lines since last analysis. Avoids re-processing. Offset always advances even on timeout/empty result to prevent retry loops on large transcripts.
 - **Observer session isolation** — SDK query() gets `cwd: observer-sessions/` to prevent polluting user's project directories with session files. Cleanup is recursive (handles `subagents/` subdirs).
 - **Self-loop prevention** — Three-layer defense against infinite hook→worker→SDK→hook loops: (1) SDK sessions have all tools disallowed, (2) SDK runs in isolated cwd, (3) hook checks `input.cwd.startsWith(observerCwd)` using the exact path from worker `/health` + `endsWith('observer-sessions')` to also filter other plugins' observer sessions (e.g. claude-mem's). No substring matching on our own path — avoids false positives on user projects.
 - **SQLite over JSON** — Switched from data.json to node:sqlite (Node >= 22) for indexed queries and no full-file rewrite on every operation. Auto-migrates from data.json on first run.
@@ -59,7 +59,7 @@ All at `~/.claude/task-tracker/`:
   4. **AI tools (optional)** — in-process MCP server exposes `search_tasks` / `get_task` / `get_task_tree` / `list_tasks` so Sonnet can dig deeper when candidate list is insufficient
   Fallback: if `uvx` is missing, BM25 ranker (`search.mjs`) is available but worker currently keeps candidate set without chroma; tools still expose hybrid search. Auto-backfill existing tasks on worker startup. `createTask`/`updateTask` fire-and-forget re-index when indexed fields change.
 - **Mandatory parent-check** (v1.8.3) — Prompt includes a dedicated root task reference list (chroma semantic search for roots + cwd-linked roots) and MANDATORY instructions: every new task must either match an existing root or justify creating a new one. Framed as "Creating unnecessary root tasks is a quality failure" to make AI conservative about `parent_id: null`.
-- **First-analysis full transcript** (v1.8.2) — When `offset === 0` (session never analyzed), bypasses `minDeltaChars` and reads full transcript. Prompt tells AI this is the first analysis, establish tasks from scratch. Fixes cold-start for pre-existing sessions.
+- **First-analysis full transcript** (v1.8.2→v1.8.5) — When `offset === 0` (session never analyzed), bypasses `minDeltaChars` and reads full transcript. Tool results (`[Result: ...]`) are stripped to dramatically reduce size — tool outputs (file contents, grep results) are 80%+ of transcript bulk but carry little task-level signal. Summary is NOT truncated. Prompt tells AI this is the first analysis, establish tasks from scratch.
 
 ## Development Notes
 
@@ -74,7 +74,9 @@ All at `~/.claude/task-tracker/`:
 - Schema migrations in `migrateSchema()` run on every startup, adding new columns with defaults for existing DBs
 - **Optional deps**: `uvx` (from `uv`) enables chroma-mcp for embeddings. `zod` (sibling to SDK in node_modules) enables MCP tools. Both degrade gracefully if missing.
 - When `mcpServers` is passed to SDK `query()`, `maxTurns` auto-bumps to ≥5 so AI has room to iterate on tool calls
-- HyDE uses `haiku` model (hardcoded), analysis uses `cfg.model` (default `sonnet`). Haiku is cheap enough that every analysis runs HyDE.
+- HyDE uses `haiku` model (hardcoded), analysis uses `cfg.model` (default `claude-sonnet-4-6` = Sonnet 1M context). Haiku is cheap enough that every analysis runs HyDE.
+- Analysis timeout default is 300s (5 min). Analysis is async background work, no user-facing latency impact.
+- Candidate pool capped at 50 tasks (prioritizing direct hits over family expansion) to keep prompts manageable.
 
 ## Distribution
 
