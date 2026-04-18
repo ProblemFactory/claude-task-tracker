@@ -78,8 +78,11 @@ select { width:100%; padding:4px 8px; border-radius:4px; border:1px solid var(--
 .task-id { font-size:11px; color:var(--text-dim); margin-top:4px; flex-shrink:0; }
 
 /* Expand area */
-.task-expand { max-height:0; overflow:hidden; transition:max-height .3s ease; }
-.task-card.expanded .task-expand { max-height:2000px; }
+.task-expand { display:none; }
+.task-card.expanded .task-expand { display:block; }
+.collapse-btn { display:none; background:none; border:1px solid var(--border); color:var(--text-dim); font-size:10px; padding:2px 10px; border-radius:3px; cursor:pointer; margin-top:6px; }
+.collapse-btn:hover { color:var(--text); border-color:var(--text-dim); }
+.task-card.expanded .collapse-btn { display:inline-block; }
 
 /* Subtasks */
 .subtask-list { margin-top:8px; display:flex; flex-direction:column; gap:2px; }
@@ -89,8 +92,8 @@ select { width:100%; padding:4px 8px; border-radius:4px; border:1px solid var(--
 .subtask-body { flex:1; min-width:0; }
 .subtask-title { color:var(--text); font-size:12px; }
 .subtask-meta { font-size:10px; color:var(--text-dim); margin-top:1px; }
-.subtask-notes { font-size:11px; color:var(--text-dim); white-space:pre-wrap; margin-top:4px; padding:4px 0; max-height:0; overflow:hidden; transition:max-height .2s; }
-.subtask-item.sub-expanded .subtask-notes { max-height:500px; }
+.subtask-notes { font-size:11px; color:var(--text-dim); white-space:pre-wrap; margin-top:4px; padding:4px 0; display:none; }
+.subtask-item.sub-expanded .subtask-notes { display:block; }
 .subtask-toggle { font-size:10px; color:var(--accent); cursor:pointer; margin-left:4px; }
 .subtask-toggle:hover { text-decoration:underline; }
 
@@ -100,8 +103,8 @@ select { width:100%; padding:4px 8px; border-radius:4px; border:1px solid var(--
 .notes-toggle:hover { color:var(--text); }
 .notes-toggle .chevron { transition:transform .15s; font-size:9px; }
 .notes-toggle.open .chevron { transform:rotate(90deg); }
-.notes-content { font-size:11px; color:var(--text-dim); white-space:pre-wrap; max-height:0; overflow:hidden; transition:max-height .2s; margin-top:4px; }
-.notes-toggle.open + .notes-content { max-height:500px; }
+.notes-content { font-size:11px; color:var(--text-dim); white-space:pre-wrap; display:none; margin-top:4px; }
+.notes-toggle.open + .notes-content { display:block; }
 
 /* Section headers */
 .section { margin-bottom:20px; }
@@ -504,7 +507,7 @@ function renderTaskCard(t) {
         <span>${date}</span>
       </div>
       ${t.context ? `<div style="font-size:11px;color:var(--text-dim);margin-top:2px">${esc(t.context)}</div>` : ''}
-      ${hasExpand ? `<div class="task-expand">${subtaskHtml}${notesHtml}</div>` : ''}
+      ${hasExpand ? `<div class="task-expand">${subtaskHtml}${notesHtml}</div><button class="collapse-btn" onclick="event.stopPropagation();this.closest('.task-card').classList.remove('expanded')">Collapse</button>` : ''}
     </div>
     <div class="task-id">#${t.id}</div>
   </div>`;
