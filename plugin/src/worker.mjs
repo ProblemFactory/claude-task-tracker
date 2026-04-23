@@ -398,6 +398,7 @@ ${cfg.language && cfg.language !== 'auto' ? `\nIMPORTANT: Write ALL text fields 
 // same "task description" style as the indexed task.context / task.title fields.
 async function extractSearchQuery(conversationSummary) {
   if (!queryFn) return conversationSummary.slice(0, 2500);
+  const sessionsDir = join(DIR, 'observer-sessions');
   try {
     const prompt = `Extract 3-5 short phrases describing the TASKS / WORK / TOPICS in this conversation. These phrases will be used as a semantic search query against an existing task database.
 
@@ -412,7 +413,6 @@ ${conversationSummary.slice(0, 6000)}
 
 Phrases:`;
 
-    const sessionsDir = join(DIR, 'observer-sessions');
     mkdirSync(sessionsDir, { recursive: true });
     const iter = queryFn({
       prompt,
@@ -453,15 +453,17 @@ Phrases:`;
   } catch (e) {
     log(`HyDE error: ${e.message}`);
     return conversationSummary.slice(0, 2500);
+  } finally {
+    cleanObserverSessions(sessionsDir);
   }
 }
 
 async function analyzeWithSDK(prompt) {
   const cfg = loadConfig();
+  const sessionsDir = join(DIR, 'observer-sessions');
   return new Promise(async (resolve) => {
     const timeout = setTimeout(() => { log('SDK timeout'); resolve(null); }, cfg.analysisTimeout);
     try {
-      const sessionsDir = join(DIR, 'observer-sessions');
       mkdirSync(sessionsDir, { recursive: true });
       const mcpServer = buildMcpServer();
       const opts = {
@@ -483,12 +485,13 @@ async function analyzeWithSDK(prompt) {
         }
       }
       clearTimeout(timeout);
-      cleanObserverSessions(sessionsDir);
       resolve(parseJSON(fullText));
     } catch (e) {
       clearTimeout(timeout);
       log(`SDK error: ${e.message}`);
       resolve(null);
+    } finally {
+      cleanObserverSessions(sessionsDir);
     }
   });
 }
@@ -496,8 +499,11 @@ async function analyzeWithSDK(prompt) {
 function cleanObserverSessions(sessionsDir) {
   try {
     // SDK creates sessions in ~/.claude/projects/<encoded-cwd>/
-    // The encoded name replaces path separators with dashes
-    const encodedName = sessionsDir.replace(/\//g, '-').replace(/^-/, '');
+    // Claude Code encodes the cwd by replacing BOTH '/' and '.' with '-',
+    // and KEEPS the leading dash. Example:
+    //   /Users/walterxu/.claude/task-tracker/observer-sessions
+    //   → -Users-walterxu--claude-task-tracker-observer-sessions
+    const encodedName = sessionsDir.replace(/[/.]/g, '-');
     const projDir = join(homedir(), '.claude', 'projects', encodedName);
     for (const dir of [sessionsDir, projDir]) {
       if (!existsSync(dir)) continue;
