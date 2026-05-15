@@ -24,9 +24,10 @@ export function readTranscriptDelta(transcriptPath, lastOffset) {
   return { messages, newOffset: stat.size };
 }
 
-export function summarizeMessages(messages, maxChars, { skipToolResults = false } = {}) {
+export function summarizeMessages(messages, maxChars, { skipToolResults = false, source = 'claude' } = {}) {
   const config = loadConfig();
   maxChars = maxChars || config.maxSummaryChars;
+  if (source === 'codex') return summarizeCodexMessages(messages, maxChars, skipToolResults);
   const parts = [];
   let total = 0;
   for (const msg of messages) {
@@ -34,6 +35,43 @@ export function summarizeMessages(messages, maxChars, { skipToolResults = false 
     const text = extractContent(msg, skipToolResults);
     if (!text) continue;
     const role = msg.type === 'human' ? 'User' : msg.type === 'assistant' ? 'Claude' : msg.type;
+    const line = `[${role}]: ${text}`;
+    parts.push(line);
+    total += line.length;
+  }
+  return parts.join('\n\n');
+}
+
+function summarizeCodexMessages(messages, maxChars, skipToolResults) {
+  const parts = [];
+  let total = 0;
+  for (const msg of messages) {
+    if (total >= maxChars) break;
+    const p = msg.payload || msg;
+    const type = msg.type || p.type;
+    let role = '', text = '';
+
+    if (type === 'event_msg' && p.type === 'user_message') {
+      role = 'User';
+      text = p.message || '';
+    } else if (type === 'event_msg' && p.type === 'agent_message') {
+      role = 'Codex';
+      text = p.message || '';
+    } else if (type === 'response_item' && p.type === 'message') {
+      role = p.role === 'assistant' ? 'Codex' : p.role || 'System';
+      text = (p.content || []).filter(b => b.type === 'output_text' || b.type === 'text_block').map(b => b.text).join('\n');
+    } else if (type === 'response_item' && p.type === 'function_call') {
+      role = 'Codex';
+      text = `[Tool: ${p.name}(${(p.arguments || '').slice(0, 120)})]`;
+    } else if (type === 'response_item' && p.type === 'function_call_output') {
+      if (skipToolResults) continue;
+      role = 'Result';
+      text = `[Result: ${(p.output || '').slice(0, 200)}]`;
+    } else {
+      continue;
+    }
+
+    if (!text) continue;
     const line = `[${role}]: ${text}`;
     parts.push(line);
     total += line.length;

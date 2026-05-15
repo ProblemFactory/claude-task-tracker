@@ -3,6 +3,7 @@ import http from 'http';
 import { readFileSync, writeFileSync, existsSync, unlinkSync, rmdirSync, mkdirSync, appendFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import { spawn } from 'child_process';
 import {
   getAllTasks, getTaskById, getSubtasks, createTask, updateTask, taskExistsByTitle,
   addSessionLink, getRecentLinks, getAnalysisState, setAnalysisState,
@@ -151,7 +152,7 @@ async function processQueue() {
 }
 
 async function runAnalysis(job) {
-  const { sessionId, cwd, transcriptPath, isFinal } = job;
+  const { sessionId, cwd, transcriptPath, isFinal, source } = job;
   const cfg = loadConfig();
   const state = getAnalysisState(sessionId);
   const isFirstAnalysis = state.offset === 0;
@@ -159,7 +160,7 @@ async function runAnalysis(job) {
 
   if (!messages.length) return;
   // First analysis: skip tool results to fit the entire conversation, no truncation needed
-  const summary = summarizeMessages(messages, isFirstAnalysis ? Infinity : undefined, { skipToolResults: isFirstAnalysis });
+  const summary = summarizeMessages(messages, isFirstAnalysis ? Infinity : undefined, { skipToolResults: isFirstAnalysis, source: source || 'claude' });
   // First analysis of a session: don't skip regardless of size
   if (!isFirstAnalysis && !isFinal && summary.length < cfg.minDeltaChars) return;
   if (summary.length < cfg.minSummaryChars) return;
@@ -376,14 +377,20 @@ Respond with ONLY JSON:
 {"updates":[{"task_id":N,"status":"...","notes":"specific changes","origin":"user_initiated","origin_reason":"evidence","context_append":"new info (optional)","parent_id":null,"title":"only if outdated","tags":["only if outdated"],"category":"only if outdated","priority":"only if changed"}],"new_tasks":[{"title":"...","status":"in_progress","priority":"normal","tags":["project","area","tech"],"category":"feature","context":"Rich: why it exists + what's involved + key files + decisions. 2-5 sentences.","notes":"[date] what happened","parent_id":null,"origin":"user_initiated","origin_reason":"evidence"}],"session_summary":"one line"}
 ${cfg.language && cfg.language !== 'auto' ? `\nIMPORTANT: Write ALL text fields in ${cfg.language}.` : '\nIMPORTANT: Write all text fields in the SAME language the user uses in the conversation.'}`;
 
-  if (!queryFn) { log('No SDK available, skipping analysis'); return; }
-
-  const result = await analyzeWithSDK(prompt);
+  // Route to the right analysis engine based on source
+  let result;
+  if (source === 'codex') {
+    log('Routing to Codex exec for analysis');
+    result = await analyzeWithCodex(prompt);
+  } else {
+    if (!queryFn) { log('No SDK available, skipping analysis'); return; }
+    result = await analyzeWithSDK(prompt);
+  }
   // Always advance offset — even on timeout/empty, to avoid re-processing the same delta forever.
   // The next hook trigger will capture new messages beyond this point.
   setAnalysisState(sessionId, newOffset);
   if (result) {
-    applyResult(result, sessionId, cwd);
+    applyResult(result, sessionId, cwd, source);
     renderMarkdown();
     log(`${retrievalStats}`);
     log(`Analyzed: ${result.updates?.length || 0} updates, ${result.new_tasks?.length || 0} new. "${result.session_summary || ''}"`);
@@ -493,6 +500,74 @@ async function analyzeWithSDK(prompt) {
   });
 }
 
+async function analyzeWithCodex(prompt) {
+  const cfg = loadConfig();
+  const codexModel = cfg.codexModel || 'o3';
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => { log('Codex exec timeout'); child.kill(); resolve(null); }, cfg.analysisTimeout);
+    try {
+      const sessionsDir = join(DIR, 'observer-sessions');
+      mkdirSync(sessionsDir, { recursive: true });
+      const child = spawn('codex', [
+        'exec',
+        '--model', codexModel,
+        '--cd', sessionsDir,
+        '--json',
+        '--ephemeral',
+        '--skip-git-repo-check',
+        '--dangerously-bypass-approvals-and-sandbox',
+        '-o', '/dev/stderr',
+      ], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env },
+      });
+
+      child.stdin.write(prompt);
+      child.stdin.end();
+
+      let stdout = '';
+      let lastMessage = '';
+      child.stdout.setEncoding('utf-8');
+      child.stdout.on('data', chunk => { stdout += chunk; });
+      child.stderr.setEncoding('utf-8');
+      child.stderr.on('data', chunk => { lastMessage += chunk; });
+
+      child.on('close', (code) => {
+        clearTimeout(timeout);
+        // Parse JSONL stdout for agent messages — collect all text
+        let text = '';
+        for (const line of stdout.split('\n')) {
+          if (!line.trim()) continue;
+          try {
+            const ev = JSON.parse(line);
+            // item.completed with agent_message is the main output
+            if (ev.type === 'item.completed' && ev.item?.type === 'agent_message') {
+              text += (ev.item.text || '') + '\n';
+            }
+            // Also catch errors
+            if (ev.type === 'error') {
+              log(`Codex exec error event: ${ev.message}`);
+            }
+          } catch {}
+        }
+        // Fallback: -o writes last message to stderr
+        if (!text.trim()) text = lastMessage.trim();
+        if (!text.trim()) { log(`Codex exec returned no output (code ${code})`); resolve(null); return; }
+        log(`Codex exec completed (code ${code}, output ${text.length} chars)`);
+        resolve(parseJSON(text));
+      });
+      child.on('error', (e) => {
+        clearTimeout(timeout);
+        log(`Codex exec error: ${e.message}`);
+        resolve(null);
+      });
+    } catch (e) {
+      log(`Codex exec spawn error: ${e.message}`);
+      resolve(null);
+    }
+  });
+}
+
 function cleanObserverSessions(sessionsDir) {
   try {
     // SDK creates sessions in ~/.claude/projects/<encoded-cwd>/
@@ -531,7 +606,7 @@ function parseJSON(raw) {
   return null;
 }
 
-function applyResult(result, sessionId, cwd) {
+function applyResult(result, sessionId, cwd, source) {
   const now = new Date().toISOString();
   const today = now.slice(0, 16).replace('T', ' ');
 
@@ -548,6 +623,8 @@ function applyResult(result, sessionId, cwd) {
       const parent = getTaskById(parentId);
       if (parent?.tags?.length) tags = [...parent.tags];
     }
+    // Auto-tag with source (codex/claude) if not already present
+    if (source && source !== 'claude' && !tags.includes(source)) tags = [...tags, source];
     const origin = VALID_ORIGINS.includes(n.origin) ? n.origin : 'user_initiated';
     const id = createTask({
       title: n.title, status: n.status || 'open', priority: n.priority || 'normal',
@@ -667,6 +744,7 @@ const server = http.createServer(async (req, res) => {
       cwd: body.cwd || '',
       transcriptPath: body.transcript_path,
       isFinal: body.is_final || false,
+      source: body.source || 'claude',
     });
     processQueue();
     res.end(JSON.stringify({ status: 'queued', queue_length: pendingQueue.length }));

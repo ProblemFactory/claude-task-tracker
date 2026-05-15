@@ -12,6 +12,7 @@ const DEFAULTS = {
 
   // AI
   model: 'claude-sonnet-4-6',
+  codexModel: 'gpt-5.5',
   analysisTimeout: 300000,
   maxTurns: 1,
 

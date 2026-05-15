@@ -148,7 +148,13 @@ async function main(input) {
     return null;
   }
 
-  log(`${event} session=${input.session_id?.slice(0, 8)} cwd=${input.cwd}`);
+  // Detect source: Codex uses PLUGIN_ROOT env (set by codex plugin system),
+  // or we check if transcript_path contains '.codex/'
+  const source = (process.env.PLUGIN_ROOT && process.env.PLUGIN_ROOT.includes('codex'))
+    || (input.transcript_path && input.transcript_path.includes('.codex/'))
+    ? 'codex' : 'claude';
+
+  log(`${event} [${source}] session=${input.session_id?.slice(0, 8)} cwd=${input.cwd}`);
 
   if (event === 'SessionStart') {
     await ensureWorker();
@@ -178,6 +184,7 @@ async function main(input) {
       cwd: input.cwd,
       transcript_path: tp,
       is_final: false,
+      source,
     });
     return null;
   }
@@ -191,6 +198,7 @@ async function main(input) {
       cwd: input.cwd,
       transcript_path: tp,
       is_final: true,
+      source,
     });
     return null;
   }
