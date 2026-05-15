@@ -91,9 +91,9 @@ async function ensureWorker() {
     const health = await workerGet('/health');
     if (health?.status === 'ok') {
       if (health.observerCwd) _observerCwd = health.observerCwd;
-      // Check version — restart if worker is running stale code
-      if (health.version && CURRENT_VERSION !== 'unknown' && health.version !== CURRENT_VERSION) {
-        log(`Worker version ${health.version} != plugin ${CURRENT_VERSION}, restarting`);
+      // Check version — only restart if worker is OLDER than plugin (never downgrade)
+      if (health.version && CURRENT_VERSION !== 'unknown' && health.version !== CURRENT_VERSION && health.version < CURRENT_VERSION) {
+        log(`Worker version ${health.version} < plugin ${CURRENT_VERSION}, upgrading`);
         await workerPost('/shutdown', {});
         await new Promise(r => setTimeout(r, 1000));
       } else {
@@ -150,16 +150,27 @@ async function main(input) {
 
   // Detect source: Codex uses PLUGIN_ROOT env (set by codex plugin system),
   // or we check if transcript_path contains '.codex/'
-  const source = (process.env.PLUGIN_ROOT && process.env.PLUGIN_ROOT.includes('codex'))
-    || (input.transcript_path && input.transcript_path.includes('.codex/'))
-    ? 'codex' : 'claude';
+  // Detect source: check transcript path, model name, env vars, or plugin paths
+  const isCodex = (input.transcript_path && input.transcript_path.includes('.codex/'))
+    || (input.model && (input.model.startsWith('gpt') || input.model.startsWith('o3') || input.model.startsWith('o4') || input.model.includes('codex')))
+    || (process.env.PLUGIN_DATA && process.env.PLUGIN_DATA.includes('.codex'))
+    || (process.env.CODEX_HOME);
+  const source = isCodex ? 'codex' : 'claude';
 
   log(`${event} [${source}] session=${input.session_id?.slice(0, 8)} cwd=${input.cwd}`);
+
+  // Codex wraps hook output in hookSpecificOutput; Claude Code uses flat keys
+  function formatOutput(event, data) {
+    if (source === 'codex') {
+      return { hookSpecificOutput: { hookEventName: event, ...data } };
+    }
+    return data;
+  }
 
   if (event === 'SessionStart') {
     await ensureWorker();
     const ctx = await workerGet('/api/context');
-    if (ctx?.context) return { additionalContext: ctx.context };
+    if (ctx?.context) return formatOutput('SessionStart', { additionalContext: ctx.context });
     const data = loadData();
     const active = data.tasks.filter(t => t.status !== 'done');
     if (active.length) {
@@ -170,7 +181,7 @@ async function main(input) {
         const subs = active.filter(s => s.parentId === t.id);
         for (const s of subs) lines.push(`  - #${s.id} ${s.title} (${s.status})`);
       }
-      return { additionalContext: `# Active Tasks (task-tracker)\n${lines.join('\n')}` };
+      return formatOutput('SessionStart', { additionalContext: `# Active Tasks (task-tracker)\n${lines.join('\n')}` });
     }
     return null;
   }
